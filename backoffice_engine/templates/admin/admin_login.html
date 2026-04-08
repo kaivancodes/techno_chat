@@ -1,0 +1,129 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TechnoChat – Admin Sign In</title>
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'base.css' %}">
+    <link rel="stylesheet" href="{% static 'login.css' %}">
+    <style>
+        /* Strict Design System Alignment */
+        body {
+            background: var(--bg) !important;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        .card {
+            background: var(--bg-panel) !important;
+            border: 1px solid var(--border-mid) !important;
+            box-shadow: var(--shadow-island) !important;
+            padding: 40px !important;
+            width: 100%;
+            max-width: 420px;
+        }
+
+        .brand-title { color: var(--t1) !important; }
+        .brand-title span { color: var(--accent) !important; }
+        .brand-sub { color: var(--t3) !important; font-weight: 600; text-transform: lowercase; }
+
+        .field label { color: var(--t2) !important; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+
+        input {
+            background: var(--bg-card) !important;
+            border: 1px solid var(--border-mid) !important;
+            color: var(--t1) !important;
+            border-radius: var(--radius) !important;
+        }
+
+        input:focus {
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 3px var(--accent-glow) !important;
+        }
+
+        .btn-signin {
+            background: var(--accent) !important;
+            color: #111 !important;
+            font-weight: 800 !important;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 10px;
+        }
+
+        .btn-signin:hover {
+            background: var(--accent-hover) !important;
+            box-shadow: var(--shadow-accent) !important;
+        }
+
+        .divider { color: var(--accent) !important; font-weight: 700; opacity: 0.6; }
+
+        .error-msg {
+            background: rgba(248,113,113,0.1) !important;
+            border: 1px solid var(--danger) !important;
+            color: var(--danger) !important;
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="card">
+        <div class="brand">
+            <img src="{% static 'tc_logo.png' %}" alt="TechnoChat" class="brand-logo" onerror="this.style.display='none'">
+            <div class="brand-title">Techno<span>Chat</span></div>
+            <div class="brand-sub">technochat administrator</div>
+        </div>
+
+        {% if form.errors %}
+        <div class="error-msg">
+            Authentication failed. Please check credentials.
+        </div>
+        {% endif %}
+
+        <form class="form" method="POST" action="{{ app_path }}" id="login-form">
+            {% csrf_token %}
+
+            <div class="field">
+                <label for="{{ form.username.id_for_label }}">Administrator ID</label>
+                {{ form.username }}
+            </div>
+
+            <div class="field">
+                <label for="{{ form.password.id_for_label }}">Passphrase</label>
+                <div class="pw-wrap">
+                    {{ form.password }}
+                </div>
+            </div>
+
+            <input type="hidden" name="next" value="{{ next }}">
+
+            <button type="submit" class="btn-signin" id="btn-signin">
+                <span class="btn-text">Sign In</span>
+            </button>
+        </form>
+
+        <div class="divider">secure admin console</div>
+        <div class="card-footer" style="color: var(--t3); font-weight: 500;">TechnoChat &reg; 2026</div>
+    </div>
+
+    <!-- Script to sync theme from localStorage -->
+    <script>
+        const savedTheme = localStorage.getItem('tc_theme') || 'dark';
+        if (savedTheme === 'system') {
+            const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+            document.documentElement.setAttribute('data-theme', prefersLight ? 'light' : 'dark');
+        } else {
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        }
+    </script>
+</body>
+
+</html>

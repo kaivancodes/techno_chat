@@ -1,0 +1,101 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}TechnoChat{% endblock %}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'base.css' %}">
+  {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+  <div id="dc-home-app">
+
+    <!-- ── Navbar Island ── -->
+    <header class="home-nav">
+      <div class="nav-l">
+        <img src="{% static 'tc_logo.png' %}" alt="TC Logo" class="nav-logo" onerror="this.style.display='none'">
+        <div class="nav-title">Techno<span class="text-accent">Chat</span></div>
+      </div>
+
+      <nav class="nav-center-links">
+        <a href="{% url 'home' %}"      class="nav-link {% block nav_home %}{% endblock %}">Home</a>
+        <a href="{% url 'file_list' %}" class="nav-link {% block nav_files %}{% endblock %}">Files</a>
+        <a href="{% url 'chat_list' %}" class="nav-link {% block nav_chat %}{% endblock %}">Chat</a>
+        <a href="{% url 'about_us' %}"  class="nav-link {% block nav_about %}{% endblock %}">About Us</a>
+      </nav>
+
+      <div class="nav-r">
+
+        <!-- Theme Toggle -->
+        <div class="theme-tgl">
+          <button class="tbtn" data-theme="dark"   title="Dark">🌙</button>
+          <button class="tbtn" data-theme="system" title="System">💻</button>
+          <button class="tbtn" data-theme="light"  title="Light">☀️</button>
+        </div>
+
+        <!-- Profile Avatar + Dropdown -->
+        <div class="user-menu">
+          <button class="btn-profile" id="profile-btn" aria-haspopup="true" aria-expanded="false">
+            {{ initials|default:user.email|make_list|first|upper }}
+          </button>
+
+          <div class="dropdown-menu" id="profile-dropdown" role="menu">
+
+            <div class="dropdown-user-info">
+              <div class="dropdown-avatar">{{ initials|default:"?" }}</div>
+              <div class="dropdown-user-text">
+                <div class="dropdown-display-name">{{ display_name|default:user.email }}</div>
+                <div class="dropdown-username">{{ username_display|default:"" }}</div>
+              </div>
+            </div>
+
+            <div class="dropdown-sep"></div>
+
+            <a href="{% url 'profile' %}" class="dropdown-item" role="menuitem">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              Profile
+            </a>
+
+            <div class="dropdown-sep"></div>
+
+            <a href="{% url 'logout' %}" class="dropdown-item danger" role="menuitem">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+              Logout
+            </a>
+
+          </div>
+        </div>
+
+      </div>
+    </header>
+
+    <!-- ── Main Page Island ── -->
+    <div class="main-island">
+      <div class="tc-main">
+        {% block content %}{% endblock %}
+      </div>
+    </div>
+
+    <footer class="home-footer">
+      Copyright &copy; 2026–27 TechnoChat &reg;
+    </footer>
+
+  </div>
+
+{% block modals %}{% endblock %}
+
+  <script src="{% static 'base.js' %}"></script>
+  {% block extra_js %}{% endblock %}
+
+</body>
+</html>

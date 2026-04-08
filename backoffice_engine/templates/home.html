@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Home – TechnoChat{% endblock %}
+{% block nav_home %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'home.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="home-island">
+  <h1 class="home-greeting">
+    Hey! What can I do<br>for <span class="accent">you?</span>
+  </h1>
+</div>
+{% endblock %}

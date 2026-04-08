@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Profile – TechnoChat{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'profile.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="profile-page">
+  <div class="profile-card island">
+
+    <!-- Header -->
+    <div class="profile-card-header">
+      <div class="profile-avatar-lg">{{ initials|default:"?" }}</div>
+      <div>
+        <h2>Your Profile</h2>
+        <p>Complete your profile to get started with TechnoChat.</p>
+      </div>
+    </div>
+
+    {% if not profile.is_profile_complete %}
+    <div class="first-login-notice">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <circle cx="12" cy="16" r="0.5" fill="currentColor"/>
+      </svg>
+      <span>Please complete your profile before using TechnoChat.</span>
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="flash flash-error">⚠ {{ error }}</div>
+    {% endif %}
+
+    <form method="POST" action="{% url 'profile' %}">
+      {% csrf_token %}
+
+      <!-- Email (read-only) -->
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <div class="email-field">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+          </svg>
+          <span class="email-value">{{ user.email }}</span>
+          <span class="email-locked">read-only</span>
+        </div>
+      </div>
+
+      <!-- First Name + Surname -->
+      <div class="form-row-2">
+        <div class="form-group">
+          <label class="form-label">First Name</label>
+          <input type="text" name="first_name" class="form-input"
+            placeholder="John"
+            value="{{ profile.first_name }}" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Surname</label>
+          <input type="text" name="surname" class="form-input"
+            placeholder="Doe"
+            value="{{ profile.surname }}" required>
+        </div>
+      </div>
+
+      <!-- Username -->
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input type="text" id="username-input" name="username" class="form-input"
+          placeholder="john_doe"
+          value="{{ profile.username|default:'' }}"
+          maxlength="30" required>
+        <div class="field-hint" id="username-hint">
+          Must start with a letter. Only letters, numbers, _ or . allowed. Max 30 chars.
+        </div>
+      </div>
+
+      <!-- Position + Team -->
+      <div class="form-row-2">
+        <div class="form-group">
+          <label class="form-label">Position</label>
+          <input type="text" name="position_at_technostacks" class="form-input"
+            placeholder="e.g. Frontend Developer"
+            value="{{ profile.position_at_technostacks }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Team</label>
+          <input type="text" name="team" class="form-input"
+            placeholder="e.g. Engineering"
+            value="{{ profile.team }}">
+        </div>
+      </div>
+
+      <!-- Save -->
+      <div class="profile-actions">
+        <button type="submit" class="btn btn-primary btn-save">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Save Changes
+        </button>
+      </div>
+
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'profile.js' %}"></script>
+{% endblock %}

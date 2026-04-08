@@ -1,0 +1,492 @@
+/* ── about_us.css ── */
+
+.about-page {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.about-wrap {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Hero ── */
+.about-hero {
+  text-align: center;
+  padding: 10px 0 6px;
+  position: relative;
+}
+
+.about-hero::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 360px;
+  height: 220px;
+  background: radial-gradient(ellipse, rgba(223, 142, 58, 0.12) 0%, transparent 65%);
+  pointer-events: none;
+}
+
+.about-logo-mark {
+  width: 88px;
+  height: 88px;
+  background: var(--accent-dim);
+  border: 2px solid var(--border-strong);
+  border-radius: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 22px;
+  box-shadow: 0 0 0 4px var(--accent-glow), 0 0 40px rgba(223, 142, 58, 0.18);
+  position: relative;
+  z-index: 1;
+}
+
+.about-logo-img {
+  width: 58px;
+  height: 58px;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
+.about-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.2rem, 5vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.8px;
+  color: var(--t1);
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.about-title span {
+  color: var(--accent);
+}
+
+.tagline {
+  font-size: 0.92rem;
+  color: var(--t3);
+  max-width: 460px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
+
+/* ── Section Label ── */
+.section-label {
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ── Purpose Card ── */
+.purpose-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.card-top-bar {
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), #c8a060, var(--accent-hover));
+}
+
+.purpose-body {
+  padding: 26px 30px 30px;
+}
+
+.purpose-body .section-label {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.purpose-text {
+  font-size: 0.90rem;
+  line-height: 1.78;
+  color: var(--t2);
+}
+
+.purpose-text strong {
+  color: var(--t1);
+  font-weight: 600;
+}
+
+/* ── Privacy Banner ── */
+.privacy-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 22px 26px;
+  border-color: var(--border-mid) !important;
+  background: var(--accent-dim) !important;
+}
+
+.lock-icon {
+  width: 42px;
+  height: 42px;
+  background: var(--accent-dim);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.privacy-text h3 {
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--t1);
+  margin-bottom: 5px;
+}
+
+.privacy-text p {
+  font-size: 0.84rem;
+  color: var(--t2);
+  line-height: 1.65;
+}
+
+/* ── Tech Stack Grid ── */
+.stack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.stack-item {
+  padding: 18px 16px;
+  transition: border-color var(--transition), transform var(--transition);
+  cursor: default;
+}
+
+.stack-item:hover {
+  border-color: var(--border-strong) !important;
+  transform: translateY(-2px);
+}
+
+.stack-icon {
+  font-size: 1.3rem;
+  margin-bottom: 10px;
+  line-height: 1;
+}
+
+.stack-name {
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--t1);
+  margin-bottom: 4px;
+}
+
+.stack-desc {
+  font-size: 0.78rem;
+  color: var(--t3);
+  line-height: 1.55;
+}
+
+/* ── Tech Logos Strip ── */
+.tech-logos-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 24px 20px;
+}
+
+.tech-logo-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid transparent;
+  transition: all var(--transition);
+  cursor: default;
+  min-width: 90px;
+}
+
+.tech-logo-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-mid);
+  transform: translateY(-2px);
+}
+
+.tech-logo-img {
+  height: 36px;
+  width: auto;
+  max-width: 110px;
+  object-fit: contain;
+  filter: saturate(0.85) brightness(0.92);
+  transition: filter var(--transition);
+}
+
+.tech-logo-item:hover .tech-logo-img {
+  filter: saturate(1) brightness(1);
+}
+
+.tech-logo-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--t3);
+  letter-spacing: 0.04em;
+}
+
+/* ── How It Works ── */
+.flow-island {
+  padding: 26px 30px;
+}
+
+.flow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.flow-step {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.flow-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.flow-num {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  border: 1.5px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--accent);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.flow-line {
+  width: 1.5px;
+  flex: 1;
+  min-height: 20px;
+  background: var(--border-mid);
+  margin: 4px 0;
+}
+
+.flow-body {
+  padding: 5px 0 24px;
+  flex: 1;
+}
+
+.flow-step-last .flow-body {
+  padding-bottom: 0;
+}
+
+.flow-body h4 {
+  font-family: var(--font-display);
+  font-size: 0.90rem;
+  font-weight: 700;
+  color: var(--t1);
+  margin-bottom: 4px;
+}
+
+.flow-body p {
+  font-size: 0.83rem;
+  color: var(--t3);
+  line-height: 1.6;
+}
+
+/* ── Made With Love ── */
+.made-with-love {
+  border-top: 1px solid var(--border);
+  padding-top: 32px;
+  text-align: center;
+}
+
+.heart-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: var(--t3);
+  margin-bottom: 8px;
+}
+
+.heart {
+  color: #f87171;
+  font-size: 1.05rem;
+  animation: heartbeat 1.6s ease infinite;
+  display: inline-block;
+}
+
+@keyframes heartbeat {
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  14% {
+    transform: scale(1.3);
+  }
+
+  28% {
+    transform: scale(1);
+  }
+
+  42% {
+    transform: scale(1.18);
+  }
+
+  56% {
+    transform: scale(1);
+  }
+}
+
+.author {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--t1);
+  letter-spacing: -0.4px;
+  margin-bottom: 6px;
+}
+
+.author span {
+  color: var(--accent);
+}
+
+.company {
+  font-size: 0.78rem;
+  color: var(--t3);
+}
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .about-wrap {
+    padding: 20px 14px 48px;
+  }
+
+  .stack-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .purpose-body {
+    padding: 18px;
+  }
+
+  .flow-island {
+    padding: 18px;
+  }
+
+  .tech-logos-strip {
+    gap: 10px;
+  }
+}
+
+/* ── Technology Stack Group ── */
+
+.tech-stack-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-lg);
+  background: var(--bg-soft);
+}
+
+.tech-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.tech-group:last-child {
+  border-bottom: none;
+}
+
+.tech-group-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+.tech-group-items {
+  font-size: 0.82rem;
+  color: var(--t2);
+}
+
+/* ── Technology Stack Vertical ── */
+
+.tech-stack-vertical {
+  position: relative;
+  padding: 24px 24px 24px 40px;
+}
+
+.tech-line {
+  position: absolute;
+  left: 18px;
+  top: 20px;
+  bottom: 20px;
+  width: 2px;
+  background: var(--border-mid);
+}
+
+.tech-step {
+  position: relative;
+  margin-bottom: 22px;
+}
+
+.tech-step:last-child {
+  margin-bottom: 0;
+}
+
+.tech-dot {
+  position: absolute;
+  left: -24px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px var(--accent-dim);
+}
+
+.tech-title {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--t1);
+  margin-bottom: 4px;
+}
+
+.tech-items {
+  font-size: 0.82rem;
+  color: var(--t3);
+}

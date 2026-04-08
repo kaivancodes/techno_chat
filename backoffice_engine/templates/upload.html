@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Files – TechnoChat{% endblock %}
+{% block nav_files %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'upload.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="upload-page">
+
+  <!-- ── Page Header (inline: title + buttons) ── -->
+  <div class="page-header">
+    <h1>Your Files</h1>
+    <div class="upload-toolbar">
+      <a href="{% url 'create_session' %}" class="btn btn-secondary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        Start New Chat
+      </a>
+      <button class="btn btn-primary" id="btn-upload-toggle">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+        </svg>
+        Upload File
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Upload Zone Island ── -->
+  <div class="upload-zone island" id="upload-zone">
+    <div style="padding: 20px;">
+      <form id="upload-form" method="POST" action="{% url 'upload_file' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="upload-box" id="upload-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+          </svg>
+          <h3 id="upload-label">Drag &amp; drop your file here</h3>
+          <p>or click to browse &middot; PDF, TXT, MD, PPTX, DOCX, CSV, Excel, Images</p>
+          <p id="upload-analysis-copy">Each file type uses a dedicated analysis path for structure, stats, and detailed retrieval.</p>
+          <input type="file" name="file" id="file-input"
+            accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.xls,.md,.png,.jpg,.jpeg,.webp,.svg,.pptx">
+        </div>
+      </form>
+      <div class="upload-progress" id="upload-progress">
+        <div class="spinner-upload"></div>
+        <p id="upload-progress-copy">Uploading &amp; processing file...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Error Flash ── -->
+  {% if error %}
+  <div class="flash flash-error">⚠ {{ error }}</div>
+  {% endif %}
+
+  <!-- ── Files Table Island or Empty State ── -->
+  {% if files %}
+  <div class="files-island island">
+    <div class="files-table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Type</th>
+            <th>Uploaded</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in files %}
+          <tr>
+            <td>
+              <div class="file-row">
+                <div class="file-type-icon ft-{{ f.file_type }}">{{ f.file_type|upper|truncatechars:4 }}</div>
+                <div class="file-details">
+                  <div class="file-name">{{ f.original_filename|default:f.file.name }}</div>
+                  <div class="file-id">ID: {{ f.display_file_id }}</div>
+                </div>
+              </div>
+            </td>
+            <td><span class="file-type-label">{{ f.get_file_type_display }}</span></td>
+            <td><span class="file-date">{{ f.created_at|date:"M d, Y" }}</span></td>
+            <td>
+              {% if f.embedding_status == "completed" %}
+              <span class="badge badge-success"><span class="badge-dot"></span>Complete</span>
+              {% elif f.embedding_status == "pending" %}
+              <span class="badge badge-warning"><span class="badge-dot"></span>Pending</span>
+              {% else %}
+              <span class="badge badge-danger"><span class="badge-dot"></span>Failed</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="island empty-state">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+    </svg>
+    <h3>No files uploaded yet</h3>
+    <p>Upload your first document to get started</p>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'upload.js' %}"></script>
+{% endblock %}

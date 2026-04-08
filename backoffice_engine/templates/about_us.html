@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}About Us – TechnoChat{% endblock %}
+{% block nav_about %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'about_us.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="about-page">
+  <div class="about-wrap">
+
+    <!-- ── Hero ── -->
+    <div class="about-hero">
+      <div class="about-logo-mark">
+        <img src="{% static 'tc_logo.png' %}" alt="TechnoChat" class="about-logo-img"
+          onerror="this.style.display='none'">
+      </div>
+      <h1 class="about-title">Techno<span>Chat</span></h1>
+      <p class="tagline">An intelligent document assistant built in-house — so your client data never leaves the
+        building.</p>
+    </div>
+
+    <!-- ── Purpose Card ── -->
+    <div class="purpose-card island">
+      <div class="card-top-bar"></div>
+      <div class="purpose-body">
+        <span class="section-label">Purpose</span>
+
+        <p class="purpose-text">
+          TechnoChat is a <strong>private, in-house RAG (Retrieval-Augmented Generation) system</strong>
+          built exclusively for Technostacks. It enables employees to upload client documents —
+          PDFs, Word files, spreadsheets, presentations, and more — and have natural conversations
+          with them using AI.
+        </p>
+
+        <p class="purpose-text" style="margin-top: 12px;">
+          Documents are processed and embedded into a <strong>private vector database within our
+            infrastructure.</strong>
+          This allows users to chat directly with their documents using highly relevant context,
+          while every response includes <strong>clear source references</strong> pointing to the exact location
+          in the original file, ensuring accuracy and transparency.
+        </p>
+
+        <p class="purpose-text" style="margin-top: 12px;">
+          TechnoChat also provides an <strong>AI Assistant</strong> for general problem-solving,
+          <strong>real-time web search</strong> for up-to-date information, and <strong>AI-powered image
+            generation</strong>.
+          An internal admin system enables efficient management and monitoring of documents and system operations.
+        </p>
+      </div>
+    </div>
+
+    <!-- ── Privacy Banner ── -->
+    <div class="privacy-banner island">
+      <div class="lock-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+      </div>
+      <div class="privacy-text">
+        <h3>Built for Privacy</h3>
+        <p>No client data is sent to third-party AI providers. Documents are processed and stored on our own servers.
+          Only the query context needed to answer a question is ever passed to the language model.</p>
+      </div>
+    </div>
+
+    <!-- ── Capabilities ── -->
+    <span class="section-label">What you can Do</span>
+    <div class="stack-grid">
+
+      <div class="stack-item island">
+        <div class="stack-icon">📄</div>
+        <div class="stack-name">Chat with Documents</div>
+        <div class="stack-desc">Have natural conversations with your private PDFs, Word files, and spreadsheets with
+          full context.</div>
+      </div>
+
+      <div class="stack-item island">
+        <div class="stack-icon">🔍</div>
+        <div class="stack-name">Hybrid Search</div>
+        <div class="stack-desc">Combines dense semantic search with sparse keyword matching for precise retrieval.</div>
+      </div>
+
+      <div class="stack-item island">
+        <div class="stack-icon">🌐</div>
+        <div class="stack-name">Web Search</div>
+        <div class="stack-desc">Real-time information synthesis from across the internet, integrated directly into your
+          workflow.</div>
+      </div>
+      <div class="stack-item island">
+        <div class="stack-icon">✨</div>
+        <div class="stack-name">AI Assistant</div>
+        <div class="stack-desc">Advanced reasoning for coding, creative writing, and data analysis beyond document
+          constraints.</div>
+      </div>
+      <div class="stack-item island">
+        <div class="stack-icon">🖼️</div>
+        <div class="stack-name">Image Generation</div>
+        <div class="stack-desc">Generate high-quality AI images directly within the platform for creative and visual
+          needs.</div>
+      </div>
+      <div class="stack-item island">
+        <div class="stack-icon">📍</div>
+        <div class="stack-name">Source References</div>
+        <div class="stack-desc">Every response includes clear source references showing document name and exact location
+          context for easy verification.</div>
+      </div>
+
+    </div>
+    <!-- ── Technology Logos ── -->
+    <span class="section-label">Powered By</span>
+    <div class="island">
+      <div class="tech-logos-strip">
+
+        <div class="tech-logo-item">
+          <img src="{% static 'django_logo.png' %}" alt="Django" class="tech-logo-img">
+          <span class="tech-logo-name">Django</span>
+        </div>
+
+        <div class="tech-logo-item">
+          <img src="{% static 'postgresql_logo.png' %}" alt="PostgreSQL" class="tech-logo-img">
+          <span class="tech-logo-name">PostgreSQL</span>
+        </div>
+
+        <div class="tech-logo-item">
+          <img src="{% static 'gemini_logo.png' %}" alt="Gemini" class="tech-logo-img">
+          <span class="tech-logo-name">Gemini</span>
+        </div>
+
+        <div class="tech-logo-item">
+          <img src="{% static 'groq_logo.png' %}" alt="Groq" class="tech-logo-img">
+          <span class="tech-logo-name">Groq</span>
+        </div>
+
+        <div class="tech-logo-item">
+          <img src="{% static 'openai_logo.png' %}" alt="PostgreSQL" class="tech-logo-img">
+          <span class="tech-logo-name">OpenAI</span>
+        </div>
+
+        <div class="tech-logo-item">
+          <img src="{% static 'langchain_logo.png' %}" alt="LangChain" class="tech-logo-img">
+          <span class="tech-logo-name">LangChain</span>
+        </div>
+
+        <div class="tech-logo-item">
+          <img src="{% static 'pinecone_logo.jpg' %}" alt="Pinecone" class="tech-logo-img">
+          <span class="tech-logo-name">Pinecone</span>
+        </div>
+
+        <div class="tech-logo-item">
+          <img src="{% static 'serper_logo.png' %}" alt="Serper" class="tech-logo-img">
+          <span class="tech-logo-name">Serper</span>
+        </div>
+
+      </div>
+    </div>
+
+
+    <!-- ── Tech Stack ── -->
+    <span class="section-label">Technology Stack</span>
+    <div class="tech-stack-vertical island">
+
+      <div class="tech-line"></div>
+
+      <div class="tech-step">
+        <div class="tech-dot"></div>
+        <div class="tech-content">
+          <div class="tech-title">Backend</div>
+          <div class="tech-items">Django · PostgreSQL</div>
+        </div>
+      </div>
+
+      <div class="tech-step">
+        <div class="tech-dot"></div>
+        <div class="tech-content">
+          <div class="tech-title">AI Models</div>
+          <div class="tech-items">Gemini · Groq · OpenAI</div>
+        </div>
+      </div>
+
+      <div class="tech-step">
+        <div class="tech-dot"></div>
+        <div class="tech-content">
+          <div class="tech-title">RAG System</div>
+          <div class="tech-items">LangChain · Pinecone</div>
+        </div>
+      </div>
+
+      <div class="tech-step">
+        <div class="tech-dot"></div>
+        <div class="tech-content">
+          <div class="tech-title">External APIs</div>
+          <div class="tech-items">Serper.dev</div>
+        </div>
+      </div>
+
+    </div>
+
+    <span class="section-label">Under the Hood</span>
+    <div class="stack-grid">
+
+      <div class="stack-item island">
+        <div class="stack-icon">
+          <img src="{% static 'django_icon.png' %}" alt="Django"
+            style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
+        </div>
+        <div class="stack-name">Django</div>
+        <div class="stack-desc">Python web framework powering the backend, sessions, file management, and internal admin
+          controls.</div>
+      </div>
+
+      <div class="stack-item island">
+        <div class="stack-icon">
+          <img src="{% static 'postgresql_icon.png' %}" alt="PostgreSQL"
+            style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
+        </div>
+        <div class="stack-name">PostgreSQL</div>
+        <div class="stack-desc">Enterprise-grade relational database for reliable chat history and metadata storage.
+        </div>
+      </div>
+
+      <div class="stack-item island">
+        <div class="stack-icon">
+          <img src="{% static 'gemini_icon.png' %}" alt="Gemini"
+            style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
+        </div>
+        <div class="stack-name">Gemini</div>
+        <div class="stack-desc">Google's multimodal LLM for natural language understanding and image OCR.</div>
+      </div>
+
+      <div class="stack-item island">
+        <div class="stack-icon">
+          <img src="{% static 'groq_icon.png' %}" alt="Groq"
+            style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
+        </div>
+        <div class="stack-name">Groq</div>
+        <div class="stack-desc">Ultra-fast inference backend using LPU hardware for Llama and GPT-class models.</div>
+      </div>
+
+      <div class="stack-item island">
+        <div class="stack-icon">
+          <img src="{% static 'openai_icon.png' %}" alt="OpenAI"
+            style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
+        </div>
+        <div class="stack-name">OpenAI</div>
+        <div class="stack-desc">Advanced generative model used for high-quality AI image creation.</div>
+      </div>
+
+      <div class="stack-item island">
+        <div class="stack-icon">
+          <img src="{% static 'langchain_icon.png' %}" alt="LangChain"
+            style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
+        </div>
+        <div class="stack-name">LangChain</div>
+        <div class="stack-desc">RAG chain orchestration — history-aware retrieval and context-aware question answering.
+        </div>
+      </div>
+
+      <div class="stack-item island">
+        <div class="stack-icon">
+          <img src="{% static 'pinecone_icon.jpg' %}" alt="Pinecone"
+            style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
+        </div>
+        <div class="stack-name">Pinecone</div>
+        <div class="stack-desc">Hybrid vector database storing dense and sparse embeddings for fast document retrieval.
+        </div>
+      </div>
+
+      <div class="stack-item island">
+        <div class="stack-icon">
+          <img src="{% static 'serper_icon.jpg' %}" alt="Serper"
+            style="width:28px;height:28px;object-fit:contain;border-radius:6px;">
+        </div>
+        <div class="stack-name">Serper.dev</div>
+        <div class="stack-desc">Real-time search API fetching snippets from the live web to enhance AI knowledge.</div>
+      </div>
+
+    </div>
+
+    <!-- ── How It Works ── -->
+    <span class="section-label">How It Works</span>
+    <div class="flow-island island">
+      <div class="flow-list">
+
+        <div class="flow-step">
+          <div class="flow-left">
+            <div class="flow-num">1</div>
+            <div class="flow-line"></div>
+          </div>
+          <div class="flow-body">
+            <h4>Upload a Document</h4>
+            <p>An employee uploads a client file. The system extracts all text, splits it into chunks, and generates
+              dense and sparse embeddings.</p>
+          </div>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-left">
+            <div class="flow-num">2</div>
+            <div class="flow-line"></div>
+          </div>
+          <div class="flow-body">
+            <h4>Stored in Private Vector DB</h4>
+            <p>All embeddings are upserted into a private Pinecone namespace scoped to that file and user — no
+              cross-contamination between clients.</p>
+          </div>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-left">
+            <div class="flow-num">3</div>
+            <div class="flow-line"></div>
+          </div>
+          <div class="flow-body">
+            <h4>Start a Chat Session</h4>
+            <p>The employee starts a chat session linked to one or more uploaded files. Chat history is maintained
+              across the session.</p>
+          </div>
+        </div>
+
+        <div class="flow-step">
+          <div class="flow-left">
+            <div class="flow-num">4</div>
+            <div class="flow-line"></div>
+          </div>
+          <div class="flow-body">
+            <h4>Ask Questions Naturally</h4>
+            <p>Questions are answered using the most relevant document context retrieved from the system, with clear
+              source references indicating the exact location within the file.</p>
+          </div>
+        </div>
+
+        <div class="flow-step flow-step-last">
+          <div class="flow-left">
+            <div class="flow-num">5</div>
+          </div>
+          <div class="flow-body">
+            <h4>History Preserved</h4>
+            <p>Every question and answer is saved. Conversations can be resumed at any time with full context intact.
+            </p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── Made With Love ── -->
+    <div class="made-with-love">
+      <div class="heart-line">Made with <span class="heart">♥</span> by</div>
+      <div class="author">Kaivan Shah <span>for Technostacks</span></div>
+      <div class="company">Built in-house &middot; All rights reserved &middot; Technostacks {{ now.year }}</div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'about_us.js' %}"></script>
+{% endblock %}

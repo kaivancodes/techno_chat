@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Files – TechnoChat{% endblock %}
+{% block nav_files %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+    .files-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .upload-zone {
+        display: none;
+        margin-bottom: 24px;
+        animation: slideDown 0.3s ease;
+    }
+
+    .upload-zone.active {
+        display: block;
+    }
+
+    @keyframes slideDown {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .upload-box {
+        border: 2px dashed var(--border);
+        border-radius: var(--radius-lg);
+        padding: 32px;
+        text-align: center;
+        transition: all 0.2s;
+        cursor: pointer;
+        position: relative;
+    }
+
+    .upload-box:hover,
+    .upload-box.dragover {
+        border-color: var(--accent);
+        background: rgba(108, 92, 231, 0.05);
+    }
+
+    .upload-box svg {
+        width: 40px;
+        height: 40px;
+        stroke: var(--text-muted);
+        margin-bottom: 12px;
+    }
+
+    .upload-box h3 {
+        font-size: 15px;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+    }
+
+    .upload-box p {
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+
+    .upload-box input[type="file"] {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+    }
+
+    .upload-progress {
+        display: none;
+        text-align: center;
+        padding: 20px;
+    }
+
+    .upload-progress.active {
+        display: block;
+    }
+
+    .spinner-small {
+        width: 24px;
+        height: 24px;
+        border: 3px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin: 0 auto 8px;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .file-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+
+    .file-row .file-details {
+        flex: 1;
+    }
+
+    .file-row .file-name {
+        font-weight: 500;
+        font-size: 14px;
+    }
+
+    .file-row .file-date {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 2px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Your Files</h1>
+    <div class="files-toolbar">
+        <a href="{% url 'create_session' %}" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            Start New Chat
+        </a>
+        <button class="btn btn-primary" id="btn-upload-toggle">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+            </svg>
+            Upload File
+        </button>
+    </div>
+</div>
+
+<!-- Upload Zone -->
+<div class="upload-zone card" id="upload-zone">
+    <form id="upload-form" method="POST" action="{% url 'upload_file' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="upload-box" id="upload-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+            </svg>
+            <h3 id="upload-label">Drag & drop your file here</h3>
+            <p>or click to browse · PDF, DOC, TXT, CSV, XLSX, MD, Images</p>
+            <input type="file" name="file" id="file-input"
+                accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.xls,.md,.png,.jpg,.jpeg,.webp,.svg,.pptx">
+        </div>
+    </form>
+    <div class="upload-progress" id="upload-progress">
+        <div class="spinner-small"></div>
+        <p style="color:var(--text-secondary); font-size:14px;">Uploading & processing file...</p>
+    </div>
+</div>
+
+<!-- Error flash -->
+{% if error %}
+<div class="flash flash-error">⚠ {{ error }}</div>
+{% endif %}
+
+<!-- File Table -->
+{% if files %}
+<div class="card" style="padding:0; overflow:hidden;">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>File</th>
+                <th>Type</th>
+                <th>Uploaded</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in files %}
+            <tr>
+                <td>
+                    <div class="file-row">
+                        <div class="file-type-icon ft-{{ f.file_type }}">{{ f.file_type|upper|truncatechars:4 }}</div>
+                        <div class="file-details">
+                            <div class="file-name">{{ f.original_filename|default:f.file.name }}</div>
+                            <div class="file-date">ID: {{ f.id }}</div>
+                        </div>
+                    </div>
+                </td>
+                <td><span style="text-transform:capitalize; font-size:13px; color:var(--text-secondary);">{{ f.file_type }}</span></td>
+                <td><span style="font-size:13px; color:var(--text-muted);">{{ f.created_at|date:"M d, Y" }}</span></td>
+                <td>
+                    {% if f.embedding_status == "completed" %}
+                    <span class="badge badge-success"><span class="badge-dot"></span>Complete</span>
+                    {% elif f.embedding_status == "pending" %}
+                    <span class="badge badge-warning"><span class="badge-dot"></span>Pending</span>
+                    {% else %}
+                    <span class="badge badge-danger"><span class="badge-dot"></span>Failed</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card empty-state">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+    </svg>
+    <h3>No files uploaded yet</h3>
+    <p>Upload your first document to get started</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const toggleBtn = document.getElementById('btn-upload-toggle');
+    const zone = document.getElementById('upload-zone');
+    const uploadBox = document.getElementById('upload-box');
+    const fileInput = document.getElementById('file-input');
+    const uploadLabel = document.getElementById('upload-label');
+    const uploadForm = document.getElementById('upload-form');
+    const uploadProgress = document.getElementById('upload-progress');
+
+    toggleBtn.addEventListener('click', () => {
+        zone.classList.toggle('active');
+    });
+
+    // Drag & drop
+    uploadBox.addEventListener('dragover', (e) => { e.preventDefault(); uploadBox.classList.add('dragover'); });
+    uploadBox.addEventListener('dragleave', () => { uploadBox.classList.remove('dragover'); });
+    uploadBox.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadBox.classList.remove('dragover');
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            submitFile();
+        }
+    });
+
+    fileInput.addEventListener('change', () => { if (fileInput.files.length) submitFile(); });
+
+    function submitFile() {
+        uploadLabel.textContent = fileInput.files[0].name;
+        uploadBox.style.display = 'none';
+        uploadProgress.classList.add('active');
+        uploadForm.submit();
+    }
+</script>
+{% endblock %}

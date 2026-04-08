@@ -1,0 +1,19 @@
+{% extends "header_footer.html" %}
+{% load static %}
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'upload.css' %}">
+{% csrf_token %}
+
+<div class="upload-page-wrapper">
+  <main class="upload-main">
+    <div class="upload-stack">
+        File uploaded successfully.
+    </div>
+  </main>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'upload.js' %}"></script>
+{% endblock %}

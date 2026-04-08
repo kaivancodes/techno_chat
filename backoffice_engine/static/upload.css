@@ -1,0 +1,165 @@
+/* ── upload.css ── */
+
+.upload-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* ── Toolbar Row ── */
+.upload-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* ── Upload Zone Island ── */
+.upload-zone {
+  display: none;
+  flex-shrink: 0;
+}
+
+.upload-zone.active { display: block; }
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.upload-zone.active { animation: slideDown 0.28s ease; }
+
+/* Dashed drop zone */
+.upload-box {
+  border: 2px dashed var(--border-mid);
+  border-radius: var(--radius-lg);
+  padding: 36px 24px;
+  text-align: center;
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition);
+  background: transparent;
+}
+
+.upload-box:hover,
+.upload-box.dragover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  box-shadow: 0 0 0 4px var(--accent-glow), 0 0 24px var(--accent-glow2);
+}
+
+.upload-box svg {
+  width: 42px; height: 42px;
+  stroke: var(--t3);
+  margin: 0 auto 14px;
+  transition: stroke var(--transition);
+}
+
+.upload-box:hover svg,
+.upload-box.dragover svg { stroke: var(--accent); }
+
+.upload-box h3 {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--t2);
+  margin-bottom: 5px;
+  transition: color var(--transition);
+}
+
+.upload-box:hover h3,
+.upload-box.dragover h3 { color: var(--t1); }
+
+.upload-box p {
+  font-size: 0.80rem;
+  color: var(--t3);
+}
+
+.upload-box input[type="file"] {
+  position: absolute; inset: 0;
+  opacity: 0; cursor: pointer;
+}
+
+/* ── Upload Progress ── */
+.upload-progress {
+  display: none;
+  text-align: center;
+  padding: 32px 20px;
+}
+.upload-progress.active { display: block; }
+
+.spinner-upload {
+  width: 28px; height: 28px;
+  border: 3px solid var(--border-mid);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  margin: 0 auto 12px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.upload-progress p {
+  font-size: 0.88rem;
+  color: var(--t2);
+}
+
+/* ── Files Island ── */
+.files-island {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.files-table-scroll {
+  height: 100%;
+  overflow-y: auto;
+  padding: 0 0 6px;
+}
+
+/* File table padding */
+.files-island .data-table { padding: 8px; }
+
+.files-island thead tr th:first-child { padding-left: 20px; }
+.files-island thead tr th:last-child  { padding-right: 20px; }
+.files-island tbody tr td:first-child { padding-left: 20px; }
+.files-island tbody tr td:last-child  { padding-right: 20px; }
+
+/* File row layout */
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.file-details { flex: 1; min-width: 0; }
+
+.file-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--t1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-id {
+  font-size: 0.73rem;
+  color: var(--t3);
+  margin-top: 2px;
+}
+
+.file-type-label {
+  text-transform: capitalize;
+  font-size: 0.85rem;
+  color: var(--t2);
+}
+
+.file-date {
+  font-size: 0.82rem;
+  color: var(--t3);
+}

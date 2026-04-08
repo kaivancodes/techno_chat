@@ -1,0 +1,37 @@
+# --- Environment Variables (CRITICAL) ---
+.env
+.venv
+env/
+venv/
+ENV/
+
+# --- Django Specific ---
+db.sqlite3
+db.sqlite3-journal
+test_db.sqlite3
+media/
+test_media/
+staticfiles/
+static_root/
+
+# --- Python Specific ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- IDEs and Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# --- Logs and Temp ---
+*.log
+logs/
+local_settings.py
+
+# --- Migration Files ---
+/backoffice_engine/migrations/*

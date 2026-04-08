@@ -1,0 +1,56 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TechnoChat - Home</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="{% static 'home.css' %}">
+</head>
+<body>
+
+  <div id="dc-home-app">
+    <header class="home-nav">
+      <div class="nav-l">
+        <img src="{% static 'tc_logo.png' %}" alt="TC Logo" class="nav-logo">
+        <div class="nav-title">Techno<span class="text-accent">Chat</span></div>
+      </div>
+
+      <nav class="nav-center-links">
+        <a href="{% url 'home' %}" class="nav-link active">Home</a>
+        <a href="#" class="nav-link">About</a>
+        <a href="/upload_file" class="nav-link">Files</a>
+        <a href="#" class="nav-link">Chat</a>
+        <a href="#" class="nav-link">Profile</a>
+      </nav>
+
+      <div class="nav-r">
+        <div class="theme-tgl" id="theme-tgl">
+          <button class="tbtn" data-theme="dark" title="Dark Mode">🌙</button>
+          <button class="tbtn" data-theme="system" title="System Match">💻</button>
+          <button class="tbtn" data-theme="light" title="Light Mode">☀️</button>
+        </div>
+        <div class="user-menu">
+          <button class="btn-profile" id="profile-btn">
+            {{ user.email|make_list|first|upper }}
+          </button>
+          <div class="dropdown-menu" id="profile-dropdown">
+            <a href="{% url 'logout' %}" class="dropdown-item">Logout</a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+        {% block content %}
+        {% endblock %}
+
+    <footer class="home-footer">
+      Copyright &copy; 2026-27 TechnoChat &reg;
+    </footer>
+  </div>
+
+  <script src="{% static 'home.js' %}"></script>
+</body>
+</html>
