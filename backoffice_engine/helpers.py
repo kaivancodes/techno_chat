@@ -122,14 +122,27 @@ def extract_md_section_name(section_text: str, fallback: str) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _get_user(request):
-    """Get current user from session or return None."""
+    """Get current user from session or shadow admin user."""
+    # Check if admin is logged in via django auth
+    if request.user.is_authenticated and request.user.is_staff:
+        # Admins need a User object to interact with ChatSession/Files which FK to User
+        user, created = User.objects.get_or_create(
+            email=request.user.email, 
+            defaults={'password': 'admin_shadow_password', 'profile_completed': True}
+        )
+        if created:
+            UserProfile.objects.create(user=user, first_name="Admin", is_profile_complete=True)
+        return user
+
+    # Otherwise fallback to standard custom contributor auth
     user_id = request.session.get("user_id")
     if not user_id:
         return None
     try:
         return User.objects.get(id=user_id)
     except User.DoesNotExist:
-        request.session.flush()
+        if 'user_id' in request.session:
+            del request.session['user_id']
         return None
 
 def _get_or_create_profile(user):

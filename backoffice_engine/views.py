@@ -83,7 +83,11 @@ def login_view(request):
 
 
 def logout_view(request):
+    is_admin = getattr(request.user, 'is_staff', False)
     request.session.flush()
+    if is_admin:
+        django_logout(request)
+        return redirect("admin_login")
     return redirect("login")
 
 

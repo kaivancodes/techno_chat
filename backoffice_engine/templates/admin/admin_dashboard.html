@@ -1,0 +1,271 @@
+{% extends "admin/admin_base.html" %}
+{% load static %}
+
+{% block title %}Dashboard – TechnoChat Admin{% endblock %}
+
+{% block layout %}
+  <!-- Sidebar Menu -->
+  <aside class="admin-sidebar island">
+    <button class="btn btn-primary btn-new-contrib" id="btn-new-contributor">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      New Contributor
+    </button>
+    
+    <nav class="admin-nav-links">
+      <div class="nav-heading">MANAGEMENT</div>
+      <a href="?section=admins" class="nav-link {% if section == 'admins' %}active{% endif %}">Admins</a>
+      <a href="?section=admin_profiles" class="nav-link {% if section == 'admin_profiles' %}active{% endif %}">Admin Profiles</a>
+      
+      <div class="nav-heading">USERS</div>
+      <a href="?section=contributors" class="nav-link {% if section == 'contributors' %}active{% endif %}">Contributors</a>
+      <a href="?section=profiles" class="nav-link {% if section == 'profiles' %}active{% endif %}">Profiles</a>
+      
+      <div class="nav-heading">RESOURCES</div>
+      <a href="?section=files" class="nav-link {% if section == 'files' %}active{% endif %}">Files</a>
+      <a href="?section=sessions" class="nav-link {% if section == 'sessions' %}active{% endif %}">Sessions</a>
+      <a href="?section=messages" class="nav-link {% if section == 'messages' %}active{% endif %}">Messages</a>
+    </nav>
+  </aside>
+
+  <!-- Center Panel -->
+  <main class="admin-main island">
+    
+    {% if messages %}
+    <div class="admin-messages" style="margin-bottom: 20px;">
+      {% for message in messages %}
+      <div class="flash flash-{{ message.tags }}" style="padding:12px 16px; border-radius:30px; background-color: var(--bg-hover); border: 1px solid var(--border); color: var(--t1); margin-bottom: 10px;">
+        {{ message }}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if edit_id and edit_record %}
+      <!-- EDIT VIEW MODE -->
+      <div class="admin-header-row">
+        <div class="breadcrumbs">
+          Home &rsaquo; Techno_Chat &rsaquo; {{ section|title }} &rsaquo; <span class="bc-active">{{ edit_record }}</span>
+        </div>
+        <a href="?section={{ section }}" class="btn-cancel">Back</a>
+      </div>
+
+      <div class="admin-edit-form">
+        <h3>Edit Object</h3>
+        <hr class="dim-divider">
+        <form method="POST" action="?section={{ section }}&edit_id={{ edit_id }}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="edit_save">
+
+          <!-- Auto-reflecting Django fields based on UI -->
+          <div class="form-grid">
+            {% if section == 'admins' or section == 'contributors' %}
+                <div class="form-group">
+                  <label class="form-label">Email</label>
+                  <input type="email" name="email" value="{{ edit_record.email }}" class="form-input" required>
+                </div>
+                <!-- Assuming is_active tracking wasn't explicitly needed but it's good practice -->
+                <div class="form-group">
+                  <label class="form-label">Active (Staff/SuperUser rules follow standard fields if exposed)</label>
+                  <input type="text" value="System Core Controlled" class="form-input" disabled>
+                </div>
+            {% elif section == 'admin_profiles' or section == 'profiles' %}
+                <div class="form-group">
+                  <label class="form-label">First Name</label>
+                  <input type="text" name="first_name" value="{{ edit_record.first_name }}" class="form-input">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Surname</label>
+                  <input type="text" name="surname" value="{{ edit_record.surname }}" class="form-input">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Position</label>
+                  <input type="text" name="position_at_technostacks" value="{{ edit_record.position_at_technostacks }}" class="form-input">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Team</label>
+                  <select name="team" class="form-input">
+                    {% if section == 'admin_profiles' %}
+                        {% for val, name in choices.AdminTeamChoices %}
+                        <option value="{{ val }}" {% if edit_record.team == val %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    {% else %}
+                        {% for val, name in choices.ContributorTeamChoices %}
+                        <option value="{{ val }}" {% if edit_record.team == val %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    {% endif %}
+                  </select>
+                </div>
+            {% elif section == 'files' %}
+                <div class="form-group">
+                  <label class="form-label">Original Filename</label>
+                  <input type="text" name="original_filename" value="{{ edit_record.original_filename }}" class="form-input">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Status</label>
+                  <select name="embedding_status" class="form-input">
+                    {% for val, name in choices.FileProcessingStatus %}
+                    <option value="{{ val }}" {% if edit_record.embedding_status == val %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+            {% elif section == 'sessions' %}
+                <div class="form-group">
+                  <label class="form-label">Session Title</label>
+                  <input type="text" name="title" value="{{ edit_record.title }}" class="form-input">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Chat Type</label>
+                  <select name="session_type" class="form-input">
+                    {% for val, name in choices.SessionType %}
+                    <option value="{{ val }}" {% if edit_record.session_type == val %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+            {% elif section == 'messages' %}
+                <div class="form-group full-width">
+                  <label class="form-label">Question</label>
+                  <textarea name="question" class="form-input" rows="3">{{ edit_record.question }}</textarea>
+                </div>
+                <div class="form-group full-width">
+                  <label class="form-label">Answer</label>
+                  <textarea name="answer" class="form-input" rows="6">{{ edit_record.answer }}</textarea>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Model Used</label>
+                  <input type="text" name="model_used" value="{{ edit_record.model_used }}" class="form-input">
+                </div>
+            {% endif %}
+          </div>
+          
+          <div class="form-actions mt-20">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+          </div>
+        </form>
+      </div>
+
+    {% else %}
+      <!-- TABLE VIEW MODE -->
+      <form method="POST" id="bulk-delete-form" action="?section={{ section }}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="delete_bulk">
+        
+        <div class="admin-header-row table-header">
+          <h2 class="table-title">{{ section|title }} Overview</h2>
+          <div class="table-actions">
+            <span class="total-entries">Total: {{ records|length }} entries</span>
+            <button type="submit" class="btn btn-danger" id="btn-delete-selected" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              Delete Selected
+            </button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                {% if section == 'admins' %}
+                  <th>Email</th><th>Registered Date</th>
+                {% elif section == 'admin_profiles' %}
+                  <th>Full Name</th><th>Position</th><th>Team</th>
+                {% elif section == 'contributors' %}
+                  <th>Email</th><th>Registered Date</th>
+                {% elif section == 'profiles' %}
+                  <th>Full Name</th><th>Position</th><th>Team</th>
+                {% elif section == 'files' %}
+                  <th>File Name</th><th>Added By</th><th>Added At</th><th>Status</th>
+                {% elif section == 'sessions' %}
+                  <th>Session Name</th><th>Created By</th><th>Created At</th><th>Chat Type</th>
+                {% elif section == 'messages' %}
+                  <th>Question</th><th>Asked At</th><th>Model Used</th><th>Chat Mode</th>
+                {% endif %}
+                <th width="40"><input type="checkbox" id="selectAll"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for rec in records %}
+              <tr>
+                {% if section == 'admins' or section == 'contributors' %}
+                  <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{ rec.email }}</a></td>
+                  <td>{{ rec.created_at|date:"Y-m-d H:i" }}</td>
+                {% elif section == 'admin_profiles' or section == 'profiles' %}
+                  <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{ rec.get_display_name }}</a></td>
+                  <td>{{ rec.position_at_technostacks|default:"-" }}</td>
+                  <td><span class="badge">{{ rec.team|default:"-" }}</span></td>
+                {% elif section == 'files' %}
+                  <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{ rec.original_filename|default:rec.file.name }}</a></td>
+                  <td>{{ rec.user.email }}</td>
+                  <td>{{ rec.created_at|date:"Y-m-d H:i" }}</td>
+                  <td><span class="badge">{{ rec.get_embedding_status_display }}</span></td>
+                {% elif section == 'sessions' %}
+                  <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{ rec.title }}</a></td>
+                  <td>{{ rec.user.email }}</td>
+                  <td>{{ rec.created_at|date:"Y-m-d H:i" }}</td>
+                  <td>{{ rec.get_session_type_display }}</td>
+                {% elif section == 'messages' %}
+                  <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{ rec.question|truncatechars:50 }}</a></td>
+                  <td>{{ rec.created_at|date:"Y-m-d H:i" }}</td>
+                  <td>{{ rec.model_used }}</td>
+                  <td>{{ rec.chat_mode }}</td>
+                {% endif %}
+                <td><input type="checkbox" class="row-cb" name="record_ids" value="{{ rec.id }}"></td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="5" class="text-center pad-20">No records found.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </form>
+    {% endif %}
+
+  <!-- Modal Overlay for New Contributor -->
+<div class="modal-overlay" id="contributor-modal">
+  <div class="modal island">
+    <div class="modal-header">
+      <h3>New Contributor</h3>
+      <button type="button" class="btn-close-modal" id="btn-close-modal">&times;</button>
+    </div>
+    <form method="POST" action="{% url 'admin_new_contributor' %}">
+      {% csrf_token %}
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="email" name="email" class="form-input" style="border-radius: 30px;" placeholder="user@technostacks.com" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" name="password" class="form-input" style="border-radius: 30px;" placeholder="Password" required>
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label class="form-label">Position</label>
+          <input type="text" name="position" class="form-input" style="border-radius: 30px;" placeholder="Developer">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Team</label>
+          <select name="team" class="form-input" style="border-radius: 30px;" required>
+            <option value="" disabled selected>Select a Team</option>
+            {% for val, name in choices.ContributorTeamChoices %}
+            <option value="{{ val }}">{{ name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="form-actions mt-20" style="display: flex; justify-content: flex-end;">
+        <button type="submit" class="btn btn-primary" style="padding: 10px 24px; border-radius: 30px;">Add Contributor</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'admin/admin_dashboard.js' %}"></script>
+{% endblock %}

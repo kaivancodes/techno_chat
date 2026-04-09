@@ -291,8 +291,8 @@ class KieImageClient:
 
     def __init__(self, api_key: str = KIE_API_KEY):
         self.api_key = api_key
-        self.text_model = OPENAI_IMAGE_MODEL or OPENAI_TEXT_IMAGE_MODEL
-        self.edit_model = OPENAI_IMAGE_MODEL or OPENAI_TEXT_IMAGE_MODEL
+        self.text_model = OPENAI_TEXT_IMAGE_MODEL or OPENAI_IMAGE_MODEL
+        self.edit_model = OPENAI_IMAGE_MODEL
         logger.info("KieImageClient Initialized Successfully")
 
     def _headers(self) -> dict:

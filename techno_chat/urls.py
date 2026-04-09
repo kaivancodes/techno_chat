@@ -4,15 +4,18 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 from backoffice_engine import views
-
+from backoffice_engine import admin_views
 urlpatterns = [
     path("admin/",   admin.site.urls),
 
-    # Auth
+    # User
     path("",         views.login_view,   name="login"),
     path("login/",   views.login_view,   name="login_page"),
     path("logout/",        views.logout_view,        name="logout"),
-    path("admin-logout/", views.admin_logout_view,  name="admin_logout"),
+
+    path("home/",    views.home_view,    name="home"),
+    path("about/",   views.about_view,   name="about_us"),
+    path("profile/", views.profile_view, name="profile"),
 
     # Files
     path("files/",        views.file_list_view,   name="file_list"),
@@ -24,13 +27,16 @@ urlpatterns = [
     path("chat/<int:session_id>/",         views.chat_view,          name="chat"),
     path("chat/<int:session_id>/send/",    views.chat_send_view,     name="chat_send"),
 
-    # ADD these to urls.py
-
-    path("home/",    views.home_view,    name="home"),
-    path("about/",   views.about_view,   name="about_us"),
-    path("profile/", views.profile_view, name="profile"),
-
     path('chat/page-render/', views.page_render_view, name='page_render'),
+
+    # Admin
+    path("admin-login/", admin_views.admin_login_view, name="admin_login"),
+    path("admin-register/", admin_views.admin_register_view, name="admin_register"),
+    path("admin-profile/", admin_views.admin_profile_view, name="admin_profile"),
+    path("admin-dashboard/", admin_views.admin_dashboard_view, name="admin_dashboard"),
+    path("admin-new-contributor/", admin_views.admin_new_contributor_view, name="admin_new_contributor"),
+    path("admin-logout/", admin_views.admin_logout_view, name="admin_logout"),
+
 ]
 
 if settings.DEBUG:

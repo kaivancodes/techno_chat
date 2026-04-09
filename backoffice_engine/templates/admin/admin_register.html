@@ -1,0 +1,112 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TechnoChat – Admin Register</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'login.css' %}">
+  <link rel="stylesheet" href="{% static 'admin/admin_register.css' %}">
+  <script>
+    (function(){
+      var savedTheme = localStorage.getItem('tc_theme') || 'dark';
+      if (savedTheme === 'system') {
+        var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+        document.documentElement.setAttribute('data-theme', prefersLight ? 'light' : 'dark');
+      } else {
+        document.documentElement.setAttribute('data-theme', savedTheme);
+      }
+    })();
+  </script>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <img src="{% static 'tc_logo.png' %}" alt="TechnoChat" class="brand-logo" onerror="this.style.display='none'">
+      <div class="brand-title">Techno<span>Chat</span></div>
+      <div class="brand-sub">Create an administrator account</div>
+      <span class="admin-badge">Admin Portal</span>
+    </div>
+
+    {% if error %}
+    <div class="error-msg" id="error-banner">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/>
+        <circle cx="12" cy="16" r="0.5" fill="currentColor"/>
+      </svg>
+      {{ error }}
+    </div>
+    {% endif %}
+
+    {% if success %}
+    <div class="success-msg" id="success-banner">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+      </svg>
+      {{ success }}
+    </div>
+    {% else %}
+    <form class="form" method="POST" action="{% url 'admin_register' %}" id="register-form">
+      {% csrf_token %}
+
+      <div class="field">
+        <label for="email">Email address</label>
+        <input type="email" id="email" name="email" placeholder="you@technostacks.com"
+          autocomplete="email" required value="{{ request.POST.email|default:'' }}">
+      </div>
+
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="pw-wrap">
+          <input type="password" id="password" name="password"
+            placeholder="Create a strong password" autocomplete="new-password" required>
+          <button type="button" class="pw-toggle" id="pw-t1" aria-label="Toggle password">
+            <svg id="eo1" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg id="es1" viewBox="0 0 24 24" style="display:none">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          </button>
+        </div>
+        <div class="pw-rules">
+          <div class="pw-rule" id="r-len"><span class="ri">✗</span> At least 8 characters</div>
+          <div class="pw-rule" id="r-upr"><span class="ri">✗</span> One uppercase letter (A-Z)</div>
+          <div class="pw-rule" id="r-lwr"><span class="ri">✗</span> One lowercase letter (a-z)</div>
+          <div class="pw-rule" id="r-num"><span class="ri">✗</span> One number (0-9)</div>
+          <div class="pw-rule" id="r-spc"><span class="ri">✗</span> One special character (!@#$…)</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="confirm_password">Confirm Password</label>
+        <div class="pw-wrap">
+          <input type="password" id="confirm_password" name="confirm_password"
+            placeholder="Repeat your password" autocomplete="new-password" required>
+          <button type="button" class="pw-toggle" id="pw-t2" aria-label="Toggle confirm password">
+            <svg id="eo2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg id="es2" viewBox="0 0 24 24" style="display:none">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          </button>
+        </div>
+        <div class="match-hint" id="match-hint"></div>
+      </div>
+
+      <button type="submit" class="btn-signin" id="btn-register" disabled>
+        <span class="btn-text">Create Account</span>
+        <div class="spinner"></div>
+      </button>
+    </form>
+    {% endif %}
+
+    <div class="divider">admin registration</div>
+    <div class="card-footer">Already have an account? <a href="{% url 'admin_login' %}">Sign in</a></div>
+  </div>
+
+  <script src="{% static 'admin/admin_register.js' %}"></script>
+</body>
+</html>
