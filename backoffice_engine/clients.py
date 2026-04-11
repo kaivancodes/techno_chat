@@ -175,7 +175,7 @@ class GeminiClient:
         model_id = GEMINI_LLM_MODELS.get(llm_model)
         if not model_id:
             raise ValueError(f"Unknown Gemini model '{llm_model}'. Available: {list(GEMINI_LLM_MODELS.keys())}")
-        return ChatGoogleGenerativeAI(google_api_key=self.api_key, model=model_id, top_p=0.8,
+        return ChatGoogleGenerativeAI(google_api_key=self.api_key, model=model_id,
                                       temperature=GOOGLE_CHAT_COMPLETION_TEMPERATURE)
 
     def chat(self, user_prompt=None, system_prompt=None, llm_model=None) -> str:

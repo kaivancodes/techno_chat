@@ -4,7 +4,7 @@ from .settings import *  # noqa
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "test_db.sqlite3",
+        "NAME": ":memory:",
     }
 }
 
@@ -13,3 +13,7 @@ PASSWORD_HASHERS = [
 ]
 
 MEDIA_ROOT = BASE_DIR / "test_media"
+
+MIGRATION_MODULES = {
+    "backoffice_engine": None,
+}

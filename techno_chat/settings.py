@@ -309,3 +309,4 @@ OPENAI_IMAGE_MODEL = config('OPENAI_IMAGE_MODEL', cast=str)
 # =========================================================
 PAGE_RENDER_DPI    = config('PAGE_RENDER_DPI', default=150, cast=int)
 PAGE_RENDER_FORMAT = config('PAGE_RENDER_FORMAT', default='png', cast=str)
+
