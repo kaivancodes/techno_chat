@@ -3,13 +3,13 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.core.exceptions import ValidationError
 from django.contrib.auth import authenticate, login, logout
 from django.contrib import messages
+from django.contrib.contenttypes.models import ContentType
 from django.urls import reverse, NoReverseMatch
 from django.db.models import Prefetch
 from django.http import HttpRequest
 from django.db import IntegrityError
 from django.utils.text import capfirst
 from django.contrib.admin.models import ADDITION, CHANGE, DELETION, LogEntry
-from django.contrib.admin import utils as admin_utils
 
 from backoffice_engine.models import AdminUser, AdminProfile, User, UserProfile, File, ChatSession, ChatMessage, check_username
 from backoffice_engine.admin_auth import create_admin, _check_email_domain, _check_password_strength
@@ -343,6 +343,11 @@ def _format_sources_for_edit(sources, chat_mode: str = ""):
                 continue
 
             file_name = item.get("file_name", "").strip()
+            file_id = item.get("file_id")
+            if file_id:
+                file_object = File.objects.filter(pk=file_id).only("original_filename", "file").first()
+                if file_object:
+                    file_name = (file_object.original_filename or getattr(file_object.file, "name", "") or file_name).strip()
             if file_name:
                 location = _format_source_location(item)
                 formatted.append(f"{file_name} {location}".strip())
@@ -352,11 +357,11 @@ def _format_sources_for_edit(sources, chat_mode: str = ""):
     if not formatted:
         return "[]"
 
-    return "[" + ", ".join(formatted) + "]"
+    return ", ".join(formatted)
 
 
 def _history_entries_for_object(obj):
-    content_type = admin_utils.get_content_type_for_model(obj, for_concrete_model=False)
+    content_type = ContentType.objects.get_for_model(obj, for_concrete_model=False)
     entries = (
         LogEntry.objects.filter(content_type=content_type, object_id=str(obj.pk))
         .select_related("user")
@@ -409,7 +414,7 @@ def _log_admin_deletion(user, model, object_id, object_repr):
     try:
         LogEntry.objects.log_action(
             user_id=user.pk,
-            content_type_id=admin_utils.get_content_type_for_model(model).pk,
+            content_type_id=ContentType.objects.get_for_model(model, for_concrete_model=False).pk,
             object_id=object_id,
             object_repr=object_repr,
             action_flag=DELETION,

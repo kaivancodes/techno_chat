@@ -65,8 +65,7 @@
   </div>
   <div class="admin-header-row" style="margin-bottom: 20px;">
     <h4 class="edit-subtitle">{{ edit_heading }}</h4>
-    <a href="{{ history_url }}" class="btn-cancel btn-outline history-link">{{ history_button_label|default:"History"
-      }}</a>
+    <a href="{{ history_url }}" class="btn-cancel btn-outline history-link">{{ history_button_label|default:"History" }}</a>
   </div>
   <hr style="border: 0; height: 1px; background: var(--border); margin-bottom: 20px;">
 
@@ -179,11 +178,11 @@
             {% if not edit_record.team %}<option value="" disabled selected>Select Team...</option>{% endif %}
             {% if section == 'admin_profiles' %}
             {% for val, name in choices.AdminTeamChoices %}
-            <option value="{{ val }}" {% if edit_record.team==val %}selected{% endif %}>{{ name }}</option>
+            <option value="{{ val }}" {% if edit_record.team == val %}selected{% endif %}>{{ name }}</option>
             {% endfor %}
             {% else %}
             {% for val, name in choices.ContributorTeamChoices %}
-            <option value="{{ val }}" {% if edit_record.team==val %}selected{% endif %}>{{ name }}</option>
+            <option value="{{ val }}" {% if edit_record.team == val %}selected{% endif %}>{{ name }}</option>
             {% endfor %}
             {% endif %}
           </select>
@@ -203,8 +202,7 @@
           <label class="form-label">File:</label>
           <div class="form-static-box file-link-box">
             {% if edit_record.file %}
-            <a href="{{ edit_record.file.url }}" target="_blank" rel="noopener noreferrer" class="row-link">[{{
-              edit_record.file.name }}]</a>
+            <a href="{{ edit_record.file.url }}" target="_blank" rel="noopener noreferrer" class="row-link">{{ edit_record.original_filename|default:edit_record.file.name }}</a>
             {% else %}
             No file associated
             {% endif %}
@@ -218,7 +216,7 @@
           <label class="form-label">Status:</label>
           <select name="embedding_status" class="form-input">
             {% for val, name in choices.FileProcessingStatus %}
-            <option value="{{ val }}" {% if edit_record.embedding_status==val %}selected{% endif %}>{{ name }}</option>
+            <option value="{{ val }}" {% if edit_record.embedding_status == val %}selected{% endif %}>{{ name }}</option>
             {% endfor %}
           </select>
         </div>
@@ -233,8 +231,7 @@
           <label class="form-label">Files:</label>
           <select name="file_ids" class="form-input" multiple size="4">
             {% for f in session_file_choices %}
-            <option value="{{ f.id }}" {% if f in edit_record.files.all %}selected{% endif %}>{{ f.id }} - {{
-              f.original_filename|default:f.file.name }}</option>
+            <option value="{{ f.id }}" {% if f in edit_record.files.all %}selected{% endif %}>{{ f.original_filename|default:f.file.name }}</option>
             {% endfor %}
           </select>
           <div class="field-note">Use Cmd/Ctrl while clicking to select multiple files.</div>
@@ -246,10 +243,9 @@
         <div class="form-group">
           <label class="form-label">Chat Type:</label>
           <select name="session_type" class="form-input" style="border-radius: 30px;">
-            {% if not edit_record.session_type %}<option value="" disabled selected>Select Chat Type...</option>{% endif
-            %}
+            {% if not edit_record.session_type %}<option value="" disabled selected>Select Chat Type...</option>{% endif %}
             {% for val, name in choices.SessionType %}
-            <option value="{{ val }}" {% if edit_record.session_type==val %}selected{% endif %}>{{ name }}</option>
+            <option value="{{ val }}" {% if edit_record.session_type == val %}selected{% endif %}>{{ name }}</option>
             {% endfor %}
           </select>
         </div>
@@ -276,7 +272,7 @@
           <select name="chat_mode" class="form-input" style="border-radius: 30px;">
             {% if not edit_record.chat_mode %}<option value="" disabled selected>Select Chat Mode...</option>{% endif %}
             {% for val, name in chat_mode_choices %}
-            <option value="{{ val }}" {% if edit_record.chat_mode==val %}selected{% endif %}>{{ name }}</option>
+            <option value="{{ val }}" {% if edit_record.chat_mode == val %}selected{% endif %}>{{ name }}</option>
             {% endfor %}
           </select>
         </div>
@@ -418,8 +414,7 @@
             <td>{{ rec.position_at_technostacks|default:"-" }}</td>
             <td><span class="badge">{{ rec.team|default:"-" }}</span></td>
             {% elif section == 'files' %}
-            <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{
-                rec.original_filename|default:rec.file.name }}</a></td>
+            <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{ rec.original_filename|default:rec.file.name }}</a></td>
             <td>{{ rec.user.email }}</td>
             <td>{{ rec.created_at|date:"d-m-Y H:i" }}</td>
             <td><span class="badge">{{ rec.get_embedding_status_display }}</span></td>
@@ -429,8 +424,7 @@
             <td>{{ rec.created_at|date:"d-m-Y H:i" }}</td>
             <td><span class="badge">{{ rec.get_session_type_display }}</span></td>
             {% elif section == 'messages' %}
-            <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{ rec.question|truncatechars:50
-                }}</a></td>
+            <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{ rec.question|truncatechars:50 }}</a></td>
             <td>{{ rec.session.user.email }}</td>
             <td>{{ rec.created_at|date:"d-m-Y H:i" }}</td>
             <td>{{ rec.model_used }}</td>
