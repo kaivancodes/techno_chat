@@ -89,9 +89,12 @@
         </div>
         <div class="form-group">
           <label class="form-label">Team</label>
-          <input type="text" name="team" class="form-input" style="border-radius: 30px;"
-            placeholder="e.g. Engineering"
-            value="{{ profile.team }}">
+          <select name="team" class="form-input" style="border-radius: 30px;" required>
+            {% if not profile.team %}<option value="" disabled selected>Select Team...</option>{% endif %}
+            {% for val, name in team_choices %}
+            <option value="{{ val }}" {% if profile.team == val %}selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+          </select>
         </div>
       </div>
 

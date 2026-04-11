@@ -42,7 +42,7 @@ from .validators import (
     validate_chat_mode,
     validate_session_type,
 )
-from .choices import FileProcessingStatus
+from .choices import FileProcessingStatus, ContributorTeamChoices
 from .exceptions import (
     TechnoChatError, NetworkConnectionError, ChatResponseError,
     ChatModelQuotaError, ChatMessageSendError
@@ -83,11 +83,8 @@ def login_view(request):
 
 
 def logout_view(request):
-    is_admin = getattr(request.user, 'is_staff', False)
+    django_logout(request)
     request.session.flush()
-    if is_admin:
-        django_logout(request)
-        return redirect("admin_login")
     return redirect("login")
 
 
@@ -469,6 +466,10 @@ def profile_view(request):
             profile.team                     = team
             profile.is_profile_complete      = True
             profile.save()
+            # Sync completion flag on the User model itself
+            if not user.profile_completed:
+                user.profile_completed = True
+                user.save(update_fields=["profile_completed"])
             return redirect("home")
         except ValidationError as e:
             error = e.message
@@ -479,6 +480,7 @@ def profile_view(request):
         "user": user,
         "profile": profile,
         "error": error,
+        "team_choices": ContributorTeamChoices.choices,
         **_nav_context(user),
     })
 

@@ -24,6 +24,8 @@ class AdminTeamChoices(models.TextChoices):
     HR = "HR", "HR"
 
 class ContributorTeamChoices(models.TextChoices):
+    CORE = "Core", "Core"
+    HR = "HR", "HR"
     PHP = "PHP", "PHP"
     MERN_STACK = "MERN Stack", "MERN Stack"
     ANDROID = "Android", "Android"
