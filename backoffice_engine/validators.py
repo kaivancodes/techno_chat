@@ -68,6 +68,9 @@ def validate_profile_username(username: str, current_profile_pk: int):
     """
     username_pattern = re.compile(r'^[a-z][a-z0-9._]{0,29}$')
 
+    if re.search(r"\s", username or ""):
+        raise ValidationError("Spaces not allowed in username.")
+
     if not username_pattern.match(username):
         raise ValidationError("Username must start with a letter and contain only letters, numbers, underscores, or dots (max 30 chars).")
 

@@ -279,6 +279,11 @@ class AuthenticationTests(BaseTechnoChatTestCase):
                 self.assertContains(response, "Invalid email or password.")
                 self.assertNotIn("user_id", self.client.session)
 
+    def test_tc_auth_missing_credentials_show_validation_error(self):
+        response = self.client.post(reverse("login"), {"email": "", "password": ""})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please enter both email and password.")
+
     def test_tc_auth_04_first_login_redirects_to_profile(self):
         user = User.objects.create(email="new@technostacks.com", password="StrongPass1!", profile_completed=False)
         response = self.client.post(reverse("login"), {"email": user.email, "password": "StrongPass1!"})
@@ -335,8 +340,20 @@ class AuthenticationTests(BaseTechnoChatTestCase):
         profile.refresh_from_db()
         self.assertFalse(profile.is_profile_complete)
 
+    def test_admin_logout_clears_admin_session_and_redirects_to_admin_login(self):
+        admin, _ = self.create_admin_user()
+        self.set_admin_session(admin)
+        response = self.client.get(reverse("admin_logout"))
+        self.assertRedirects(response, reverse("admin_login"))
+        self.assertNotIn("tc_admin_id", self.client.session)
+
 
 class FileUploadAndExtractionTests(BaseTechnoChatTestCase):
+    def test_upload_requires_authenticated_contributor(self):
+        upload = SimpleUploadedFile("report.pdf", b"dummy-content", content_type="application/pdf")
+        response = self.client.post(reverse("upload_file"), {"file": upload})
+        self.assertRedirects(response, reverse("login"))
+
     def test_tc_file_01_to_12_supported_upload_types_save_and_complete(self):
         user, _ = self.create_contributor()
         self.set_contributor_session(user)
@@ -626,6 +643,11 @@ class RagChatTests(BaseTechnoChatTestCase):
         self.assertEqual(result["answer"], chat_service.EMPTY_RAG_RESPONSE)
         self.assertEqual(result["sources"], [])
 
+    def test_tc_rag_abusive_non_question_returns_respectful_response(self):
+        result = chat_service.build_chat_prompt("idiot", [1], [], "Gemini 2.5 Pro")
+        self.assertEqual(result["answer"], chat_service.RESPECTFUL_RESPONSE)
+        self.assertEqual(result["sources"], [])
+
     def test_tc_rag_15_to_17_source_viewer_endpoints_handle_pdf_pptx_and_text(self):
         user, _ = self.create_contributor(email="viewer@technostacks.com", username="viewer.user")
         self.set_contributor_session(user)
@@ -767,6 +789,11 @@ class WebSearchTests(BaseTechnoChatTestCase):
             with self.assertRaises(WebSearchError):
                 web_search_service.build_web_search_prompt("No results query", "Gemini 2.5 Pro", [])
 
+    def test_tc_web_abusive_non_question_returns_respectful_response(self):
+        result = web_search_service.build_web_search_prompt("idiot", "Gemini 2.5 Pro", [])
+        self.assertEqual(result["answer"], web_search_service.RESPECTFUL_RESPONSE)
+        self.assertEqual(result["sources"], [])
+
 
 class ImageGenerationTests(BaseTechnoChatTestCase):
     def test_tc_img_01_and_02_text_to_image_and_image_edit(self):
@@ -829,6 +856,17 @@ class ImageGenerationTests(BaseTechnoChatTestCase):
             with self.assertRaises(ChatResponseError) as exc:
                 image_generation_service.build_image_generation_prompt("Create art", request)
         self.assertIn("Image generation is taking longer", exc.exception.user_message)
+
+    def test_tc_img_unconfigured_client_returns_configuration_error(self):
+        request = MagicMock()
+        client = MagicMock()
+        client.api_key = ""
+        client.text_model = ""
+        client.edit_model = ""
+        with patch("backoffice_engine.image_generation_service.KieImageClient", return_value=client):
+            with self.assertRaises(ChatResponseError) as exc:
+                image_generation_service.build_image_generation_prompt("Create art", request)
+        self.assertIn("not configured properly", exc.exception.user_message)
 
 
 class SessionAndChatManagementTests(BaseTechnoChatTestCase):
@@ -899,6 +937,25 @@ class SessionAndChatManagementTests(BaseTechnoChatTestCase):
         saved = ChatMessage.objects.get(session=session)
         self.assertEqual(saved.sources, [])
         self.assertEqual(get_last_active_chat_session_id(self.client), session.id)
+
+    def test_chat_send_requires_post_method(self):
+        user, _ = self.create_contributor(email="method@technostacks.com", username="method.user")
+        self.set_contributor_session(user)
+        session = ChatSession.objects.create(user=user, title="General Talk", session_type=SessionType.GENERAL_CHAT)
+        response = self.client.get(reverse("chat_send", args=[session.id]))
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.json()["error"], "POST required")
+
+    def test_page_render_requires_auth_and_file_id(self):
+        unauthenticated = self.client.get(reverse("page_render"))
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(unauthenticated.json()["error"], "Not authenticated")
+
+        user, _ = self.create_contributor(email="preview@technostacks.com", username="preview.user")
+        self.set_contributor_session(user)
+        missing_id = self.client.get(reverse("page_render"))
+        self.assertEqual(missing_id.status_code, 400)
+        self.assertEqual(missing_id.json()["error"], "file_id required")
 
 
 class AdminPortalTests(BaseTechnoChatTestCase):
@@ -1168,6 +1225,12 @@ class AdminModelAndHelperSmokeTests(BaseTechnoChatTestCase):
         response = self.client.get(reverse("chat_list"))
         self.assertRedirects(response, reverse("chat", args=[second.id]))
         self.assertNotEqual(first.id, get_last_active_chat_session_id(self.client))
+
+    def test_chat_list_without_sessions_redirects_to_create_session(self):
+        user, _ = self.create_contributor(email="emptychat@technostacks.com", username="emptychat.user")
+        self.set_contributor_session(user)
+        response = self.client.get(reverse("chat_list"))
+        self.assertRedirects(response, reverse("create_session"))
 
 
 class StaticRegressionSmokeTests(SimpleTestCase):

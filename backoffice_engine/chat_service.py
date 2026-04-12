@@ -291,6 +291,10 @@ def _merge_adjacent_sources(sources: list[SourceEntry]) -> list[SourceEntry]:
             continue
 
         previous = merged_sources[-1]
+        previous_start = previous.get("page_index")
+        previous_end = previous.get("page_end", previous_start)
+        source_start = source.get("page_index")
+        source_end = source.get("page_end", source_start)
         same_document = (
             previous.get("file_id") == source.get("file_id")
             and previous.get("file_type") == source.get("file_type")
@@ -298,18 +302,19 @@ def _merge_adjacent_sources(sources: list[SourceEntry]) -> list[SourceEntry]:
         )
         can_merge_pages = (
             same_document
-            and previous.get("page_index") is not None
-            and source.get("page_index") is not None
+            and previous_start is not None
+            and source_start is not None
             and previous.get("slide_index") is None
             and source.get("slide_index") is None
             and previous.get("sheet_name") is None
             and source.get("sheet_name") is None
             and previous.get("section_name") is None
             and source.get("section_name") is None
-            and previous.get("page_end", previous.get("page_index")) + 1 >= source.get("page_index")
+            and min(previous_end, source_end) <= max(previous_start, source_start) + 1
         )
         if can_merge_pages:
-            previous["page_end"] = source.get("page_end", source.get("page_index"))
+            previous["page_index"] = min(previous_start, source_start)
+            previous["page_end"] = max(previous_end, source_end)
             continue
 
         merged_sources.append(dict(source))
@@ -562,6 +567,16 @@ def build_chat_prompt(query: str, file_ids: list, chat_history: list, model_name
         raw_answer = response.content if hasattr(response, "content") else str(response)
         structured = _parse_structured_answer(raw_answer)
         answer = structured["answer"].strip()
+        if structured["used_context_ids"] == [] and answer == EMPTY_RAG_RESPONSE:
+            logger.info("build_chat_prompt | llm returned empty-context fallback | query=%s", question_part)
+            all_answers.append(EMPTY_RAG_RESPONSE)
+            continue
+        if structured["used_context_ids"] == [] and not (
+            is_summary_request(question_part) or is_list_request(question_part) or is_numeric_filter_request(question_part)
+        ):
+            logger.info("build_chat_prompt | refusing source-less answer to avoid hallucination | query=%s", question_part)
+            all_answers.append(EMPTY_RAG_RESPONSE)
+            continue
         part_used_chunks = _select_used_chunks(selected_chunks, structured["used_context_ids"], question_part)
         used_chunks.extend(part_used_chunks)
         all_answers.append(answer)

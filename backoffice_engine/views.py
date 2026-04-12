@@ -8,6 +8,9 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.contrib.auth import logout as django_logout
+from django.contrib.auth import SESSION_KEY as DJANGO_AUTH_USER_ID
+from django.contrib.auth import BACKEND_SESSION_KEY as DJANGO_AUTH_BACKEND
+from django.contrib.auth import HASH_SESSION_KEY as DJANGO_AUTH_HASH
 
 from techno_chat.settings import logger
 
@@ -19,6 +22,8 @@ from .helpers import (
     is_network_error, is_quota_error
 )
 from .conversation_state_service import (
+    answer_personal_memory_query,
+    extract_personal_memory_update,
     get_conversation_state,
     get_last_active_chat_session_id,
     set_last_active_chat_session,
@@ -59,6 +64,110 @@ from .constants import (
 # AUTH VIEWS
 # =============================================================================
 
+_SESSION_RESET_KEYS = ("user_id", "conversation_state", "last_chat_session_id")
+
+
+def _clear_user_session_state(request):
+    for key in _SESSION_RESET_KEYS:
+        request.session.pop(key, None)
+    request.session.modified = True
+
+
+def _clear_admin_session_state(request):
+    for key in ("tc_admin_id", "role", DJANGO_AUTH_USER_ID, DJANGO_AUTH_BACKEND, DJANGO_AUTH_HASH):
+        request.session.pop(key, None)
+    request.session.modified = True
+
+
+def _ordered_range(start, end):
+    if start is None:
+        return None, None
+    if end is None:
+        return start, start
+    return (start, end) if start <= end else (end, start)
+
+
+def _format_chat_source_ref(source: dict) -> str:
+    file_type = (source.get("file_type") or "").lower()
+    if file_type == "md" and source.get("section_name"):
+        start, end = _ordered_range(source.get("line_start"), source.get("line_end"))
+        if start is not None and end is not None and start != end:
+            return f"§ {source['section_name']} · Lines {start}–{end}"
+        if start is not None:
+            return f"§ {source['section_name']} · Line {start}"
+        return f"§ {source['section_name']}"
+    if file_type in {"ppt", "pptx"} and source.get("slide_index") is not None:
+        return f"Slide {source['slide_index']}"
+    if file_type in {"xlsx", "xls"} and source.get("row_start") is not None:
+        start, end = _ordered_range(source.get("row_start"), source.get("row_end"))
+        prefix = f"{source['sheet_name']} · " if source.get("sheet_name") else ""
+        if start is not None and end is not None and start != end:
+            return f"{prefix}Rows {start}–{end}"
+        return f"{prefix}Row {start}"
+    if file_type == "csv" and source.get("row_start") is not None:
+        start, end = _ordered_range(source.get("row_start"), source.get("row_end"))
+        if start is not None and end is not None and start != end:
+            return f"Rows {start}–{end}"
+        return f"Row {start}"
+    if file_type == "txt" and source.get("line_start") is not None:
+        start, end = _ordered_range(source.get("line_start"), source.get("line_end"))
+        if start is not None and end is not None and start != end:
+            return f"Lines {start}–{end}"
+        return f"Line {start}"
+    if source.get("page_index") is not None:
+        start, end = _ordered_range(source.get("page_index"), source.get("page_end"))
+        if start is not None and end is not None and start != end:
+            return f"Page {start}–{end}"
+        return f"Page {start}"
+    return ""
+
+
+def _prepare_sources_for_display(sources, chat_mode: str):
+    prepared = []
+    for src in sources or []:
+        if not isinstance(src, dict):
+            continue
+        if src.get("kind") in {"generated_image", "uploaded_image"}:
+            continue
+        if chat_mode == CHAT_MODE_AI_ASSISTANT:
+            continue
+        if chat_mode == CHAT_MODE_WEB_SEARCH:
+            prepared.append(src)
+            continue
+        if chat_mode != CHAT_MODE_RAG:
+            continue
+        prepared.append(
+            {
+                **src,
+                "display_ref": _format_chat_source_ref(src),
+                "display_file_name": src.get("file_name", ""),
+                "page_range_start": _ordered_range(src.get("page_index"), src.get("page_end"))[0],
+                "page_range_end": _ordered_range(src.get("page_index"), src.get("page_end"))[1],
+                "line_range_start": _ordered_range(src.get("line_start"), src.get("line_end"))[0],
+                "line_range_end": _ordered_range(src.get("line_start"), src.get("line_end"))[1],
+                "row_range_start": _ordered_range(src.get("row_start"), src.get("row_end"))[0],
+                "row_range_end": _ordered_range(src.get("row_start"), src.get("row_end"))[1],
+            }
+        )
+    return prepared
+
+
+def _detect_chat_intent(query: str, requested_chat_mode: str, uploaded_image, conversation_state: dict | None) -> str:
+    lowered = (query or "").strip().lower()
+    if uploaded_image or requested_chat_mode == CHAT_MODE_IMAGE_GENERATION:
+        return CHAT_MODE_IMAGE_GENERATION
+    if extract_personal_memory_update(query):
+        return "personal_memory_store"
+    if answer_personal_memory_query(query, conversation_state):
+        return "personal_memory_recall"
+    if lowered in {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"}:
+        return "greeting"
+    if requested_chat_mode == CHAT_MODE_WEB_SEARCH:
+        return CHAT_MODE_WEB_SEARCH
+    if requested_chat_mode == CHAT_MODE_AI_ASSISTANT:
+        return CHAT_MODE_AI_ASSISTANT
+    return CHAT_MODE_RAG
+
 def login_view(request):
     error = None
     if request.method == "POST":
@@ -83,8 +192,7 @@ def login_view(request):
 
 
 def logout_view(request):
-    django_logout(request)
-    request.session.flush()
+    _clear_user_session_state(request)
     return redirect("login")
 
 
@@ -223,6 +331,8 @@ def chat_view(request, session_id):
         .order_by("-created_at")
     )
     messages = ChatMessage.objects.filter(session=session).order_by("created_at")
+    for message in messages:
+        message.display_sources = _prepare_sources_for_display(message.sources, getattr(message, "chat_mode", ""))
 
     # Available models
     all_models = list(settings.GEMINI_LLM_MODELS.keys()) + list(settings.GROQ_LLM_MODELS.keys())
@@ -306,63 +416,89 @@ def chat_send_view(request, session_id):
         )
         chat_history.reverse()
         conversation_state = get_conversation_state(request, session.id)
+        detected_intent = _detect_chat_intent(query, chat_mode, uploaded_image, conversation_state)
 
-        # ── 4. Route to the correct service ─────────────────────────────────
+        if detected_intent == "personal_memory_store":
+            update_conversation_state(request, session.id, query=query, resolved_query=query)
+            set_last_active_chat_session(request, session.id)
+            prompt = f"I'll remember that your name is {extract_personal_memory_update(query)['name']}."
+            sources = []
+            is_greeting = False
+            is_summary = False
+            effective_chat_mode = CHAT_MODE_AI_ASSISTANT
+            image_urls = []
+            resolved_query = query
+            selected_model = model_name or list(settings.GEMINI_LLM_MODELS.keys())[0]
+        elif detected_intent == "personal_memory_recall":
+            remembered_name = answer_personal_memory_query(query, conversation_state)
+            prompt = remembered_name or "I don't know your name yet."
+            sources = []
+            is_greeting = False
+            is_summary = False
+            effective_chat_mode = CHAT_MODE_AI_ASSISTANT
+            image_urls = []
+            resolved_query = query
+            selected_model = model_name or list(settings.GEMINI_LLM_MODELS.keys())[0]
+            update_conversation_state(request, session.id, query=query, resolved_query=query)
+            set_last_active_chat_session(request, session.id)
+        else:
 
-        try:
-            if chat_mode == CHAT_MODE_IMAGE_GENERATION:
-                result = build_image_generation_prompt(
-                    query=query,
-                    request=request,
-                    uploaded_image=uploaded_image,
-                )
-            elif chat_mode == CHAT_MODE_AI_ASSISTANT:
-                result = build_ai_assistant_prompt(
-                    query=query,
-                    chat_history=chat_history,
-                    model_name=model_name,
-                    conversation_state=conversation_state,
-                )
-            elif chat_mode == CHAT_MODE_WEB_SEARCH:
-                result = build_web_search_prompt(
-                    query=query,
-                    model_name=model_name,
-                    chat_history=chat_history,
-                    conversation_state=conversation_state,
-                )
-            else:
-                result = build_chat_prompt(
-                    query=query,
-                    file_ids=file_ids,
-                    chat_history=chat_history,
-                    model_name=model_name,
-                    conversation_state=conversation_state,
-                )
-        except TechnoChatError:
-            raise
-        except Exception as e:
-            if is_network_error(e):
-                raise NetworkConnectionError(
-                    internal=f"Network during mode={chat_mode}. raw={e}"
-                )
-            if is_quota_error(e):
-                raise ChatModelQuotaError(
-                    internal=f"Quota during mode={chat_mode}. model={model_name} raw={e}"
-                )
-            raise ChatResponseError(
-                internal=f"Pipeline failed. mode={chat_mode}. raw={e}"
-            )
+            # ── 4. Route to the correct service ─────────────────────────────────
 
-        prompt     = result["answer"]
-        sources    = result["sources"]
-        is_greeting = result["is_greeting"]
-        is_summary  = result["is_summary"]
-        effective_chat_mode = result.get("chat_mode", chat_mode)
-        image_urls = result.get("image_urls", [])
-        resolved_query = result.get("resolved_query", query)
-        selected_model = result.get("selected_model", model_name)
-        update_conversation_state(request, session.id, query=query, resolved_query=resolved_query)
-        set_last_active_chat_session(request, session.id)
+            try:
+                if detected_intent == CHAT_MODE_IMAGE_GENERATION:
+                    result = build_image_generation_prompt(
+                        query=query,
+                        request=request,
+                        uploaded_image=uploaded_image,
+                    )
+                elif detected_intent == CHAT_MODE_AI_ASSISTANT:
+                    result = build_ai_assistant_prompt(
+                        query=query,
+                        chat_history=chat_history,
+                        model_name=model_name,
+                        conversation_state=conversation_state,
+                    )
+                elif detected_intent == CHAT_MODE_WEB_SEARCH:
+                    result = build_web_search_prompt(
+                        query=query,
+                        model_name=model_name,
+                        chat_history=chat_history,
+                        conversation_state=conversation_state,
+                    )
+                else:
+                    result = build_chat_prompt(
+                        query=query,
+                        file_ids=file_ids,
+                        chat_history=chat_history,
+                        model_name=model_name,
+                        conversation_state=conversation_state,
+                    )
+            except TechnoChatError:
+                raise
+            except Exception as e:
+                if is_network_error(e):
+                    raise NetworkConnectionError(
+                        internal=f"Network during mode={chat_mode}. raw={e}"
+                    )
+                if is_quota_error(e):
+                    raise ChatModelQuotaError(
+                        internal=f"Quota during mode={chat_mode}. model={model_name} raw={e}"
+                    )
+                raise ChatResponseError(
+                    internal=f"Pipeline failed. mode={chat_mode}. raw={e}"
+                )
+
+            prompt     = result["answer"]
+            sources    = result["sources"]
+            is_greeting = result["is_greeting"]
+            is_summary  = result["is_summary"]
+            effective_chat_mode = result.get("chat_mode", chat_mode)
+            image_urls = result.get("image_urls", [])
+            resolved_query = result.get("resolved_query", query)
+            selected_model = result.get("selected_model", model_name)
+            update_conversation_state(request, session.id, query=query, resolved_query=resolved_query)
+            set_last_active_chat_session(request, session.id)
 
         # ── 5. Save message ───────────────────────────────────────────────────
         try:

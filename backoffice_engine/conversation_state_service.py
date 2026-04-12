@@ -12,6 +12,15 @@ from collections import Counter
 
 SESSION_KEY = "conversation_state"
 LAST_CHAT_KEY = "last_chat_session_id"
+_PERSONAL_MEMORY_LIMIT = 8
+_NAME_MEMORY_PATTERN = re.compile(
+    r"^\s*my name is\s+(?P<name>[A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,4})\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+_NAME_RECALL_PATTERN = re.compile(
+    r"^\s*(?:what is my name|what's my name|tell me my name|who am i)\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
 
 _STOPWORDS = {
     "what", "which", "where", "when", "why", "how", "who", "is", "are", "the",
@@ -63,6 +72,12 @@ def update_conversation_state(request, session_id: int, query: str, resolved_que
     if current["recent_entities"]:
         current["active_entities"] = current["recent_entities"][:5]
 
+    memory_update = extract_personal_memory_update(text)
+    if memory_update:
+        memories = dict(current.get("personal_memory", {}))
+        memories.update(memory_update)
+        current["personal_memory"] = dict(list(memories.items())[-_PERSONAL_MEMORY_LIMIT:])
+
     all_state[str(session_id)] = current
     request.session[SESSION_KEY] = all_state
     request.session.modified = True
@@ -84,7 +99,25 @@ def _normalize_state(state: dict | None) -> dict:
     current.setdefault("active_entities", [])
     current.setdefault("recent_queries", [])
     current.setdefault("recent_entities", list(current.get("active_entities", [])))
+    current.setdefault("personal_memory", {})
     return current
+
+
+def extract_personal_memory_update(text: str) -> dict:
+    match = _NAME_MEMORY_PATTERN.match(text or "")
+    if not match:
+        return {}
+    name = re.sub(r"\s+", " ", match.group("name")).strip()
+    if not name:
+        return {}
+    return {"name": name}
+
+
+def answer_personal_memory_query(text: str, state: dict | None) -> str:
+    if not _NAME_RECALL_PATTERN.match(text or ""):
+        return ""
+    memory = (state or {}).get("personal_memory", {})
+    return str(memory.get("name", "")).strip()
 
 
 def _extract_topic(text: str) -> str:

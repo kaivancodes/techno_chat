@@ -36,7 +36,7 @@ _SHORT_CONTEXT_QUERY_PATTERN = re.compile(
 
 
 def is_greeting_query(query: str, chat_history: list | None = None) -> bool:
-    return not chat_history and bool(_GREETING_PATTERN.match(query or ""))
+    return bool(_GREETING_PATTERN.match(query or ""))
 
 
 def contains_offensive_language(query: str) -> bool:

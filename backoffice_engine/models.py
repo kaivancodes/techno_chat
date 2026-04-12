@@ -1,6 +1,7 @@
 from django.db import models
 from backoffice_engine.choices import FileType, FileProcessingStatus, SessionType, AdminTeamChoices, ContributorTeamChoices
 from django.core.validators import RegexValidator
+from django.core.exceptions import ValidationError
 from django.utils.timezone import now
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.hashers import make_password, check_password
@@ -28,6 +29,8 @@ def check_password_strength(value):
 
 # ✅ USERNAME FUNCTION
 def check_username(value):
+    if any(char.isspace() for char in (value or "")):
+        raise ValidationError("Spaces not allowed in username.")
     validator = RegexValidator(
         regex=r'^[a-zA-Z][a-zA-Z0-9._]{0,29}$',
         message=(

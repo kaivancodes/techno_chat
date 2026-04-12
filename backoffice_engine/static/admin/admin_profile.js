@@ -32,11 +32,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (usernameInput && usernameHint) {
     usernameInput.addEventListener('input', () => {
-      const val = usernameInput.value.trim();
+      const rawVal = usernameInput.value;
+      const val = rawVal.trim();
 
       if (val === '') {
-        usernameHint.textContent  = 'Must start with a letter. Only letters, numbers, _ or . allowed. Max 30 chars.';
+        usernameHint.textContent  = 'Must start with a letter. Spaces not allowed. Only letters, numbers, _ or . allowed. Max 30 chars.';
         usernameHint.style.color  = 'var(--t3)';
+        isUsernameValid = false;
+        validateSaveState();
+        return;
+      }
+
+      if (/\s/.test(rawVal)) {
+        usernameHint.textContent = '✗ Spaces not allowed in username.';
+        usernameHint.style.color = 'var(--danger)';
         isUsernameValid = false;
         validateSaveState();
         return;

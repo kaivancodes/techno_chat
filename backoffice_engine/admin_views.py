@@ -110,12 +110,9 @@ def admin_register_view(request):
 # ADMIN LOGOUT
 # =========================
 def admin_logout_view(request):
-    logout(request)
-    if 'tc_admin_id' in request.session:
-        del request.session['tc_admin_id']
-    if 'role' in request.session:
-        del request.session['role']
-    request.session.flush()
+    for key in ("_auth_user_id", "_auth_user_backend", "_auth_user_hash", "tc_admin_id", "role"):
+        request.session.pop(key, None)
+    request.session.modified = True
     return redirect("admin_login")
 
 
@@ -284,30 +281,37 @@ def _record_heading(section: str, record):
 
 
 def _format_source_location(item: dict) -> str:
+    def _ordered_range(start, end):
+        if start is None:
+            return None, None
+        if end is None:
+            return start, start
+        return (start, end) if start <= end else (end, start)
+
     if item.get("section_name"):
         return f"section {item['section_name']}"
     if item.get("slide_index") is not None:
         return f"slide {item['slide_index']}"
     if item.get("sheet_name") and item.get("row_start") is not None:
-        row_end = item.get("row_end")
-        if row_end and row_end != item["row_start"]:
-            return f"{item['sheet_name']} rows {item['row_start']}-{row_end}"
-        return f"{item['sheet_name']} row {item['row_start']}"
+        row_start, row_end = _ordered_range(item.get("row_start"), item.get("row_end"))
+        if row_start is not None and row_end is not None and row_end != row_start:
+            return f"{item['sheet_name']} rows {row_start}-{row_end}"
+        return f"{item['sheet_name']} row {row_start}"
     if item.get("row_start") is not None:
-        row_end = item.get("row_end")
-        if row_end and row_end != item["row_start"]:
-            return f"rows {item['row_start']}-{row_end}"
-        return f"row {item['row_start']}"
+        row_start, row_end = _ordered_range(item.get("row_start"), item.get("row_end"))
+        if row_start is not None and row_end is not None and row_end != row_start:
+            return f"rows {row_start}-{row_end}"
+        return f"row {row_start}"
     if item.get("line_start") is not None:
-        line_end = item.get("line_end")
-        if line_end and line_end != item["line_start"]:
-            return f"lines {item['line_start']}-{line_end}"
-        return f"line {item['line_start']}"
+        line_start, line_end = _ordered_range(item.get("line_start"), item.get("line_end"))
+        if line_start is not None and line_end is not None and line_end != line_start:
+            return f"lines {line_start}-{line_end}"
+        return f"line {line_start}"
     if item.get("page_index") is not None:
-        page_end = item.get("page_end")
-        if page_end and page_end != item["page_index"]:
-            return f"page {item['page_index']}-{page_end}"
-        return f"page {item['page_index']}"
+        page_start, page_end = _ordered_range(item.get("page_index"), item.get("page_end"))
+        if page_start is not None and page_end is not None and page_end != page_start:
+            return f"page {page_start}-{page_end}"
+        return f"page {page_start}"
     return ""
 
 
@@ -662,7 +666,7 @@ def _prepare_context(section, records, edit_record=None, show_history=False):
     if edit_record is not None:
         file_choices = []
         if section == "sessions":
-            file_choices = File.objects.filter(user=edit_record.user).order_by("original_filename", "id")
+            file_choices = edit_record.files.all().order_by("original_filename", "id")
 
         history_entries = _history_entries_for_object(edit_record) if show_history else []
         context.update(

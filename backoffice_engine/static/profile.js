@@ -8,11 +8,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const validPattern  = /^[a-zA-Z][a-zA-Z0-9._]{0,29}$/;
 
   usernameInput.addEventListener('input', () => {
-    const val = usernameInput.value.trim();
+    const rawVal = usernameInput.value;
+    const val = rawVal.trim();
 
     if (val === '') {
-      usernameHint.textContent  = 'Must start with a letter. Only letters, numbers, _ or . allowed. Max 30 chars.';
+      usernameHint.textContent  = 'Must start with a letter. Spaces not allowed. Only letters, numbers, _ or . allowed. Max 30 chars.';
       usernameHint.style.color  = 'var(--t3)';
+      return;
+    }
+
+    if (/\s/.test(rawVal)) {
+      usernameHint.textContent = '✗ Spaces not allowed in username.';
+      usernameHint.style.color = 'var(--danger)';
       return;
     }
 

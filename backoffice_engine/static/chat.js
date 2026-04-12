@@ -129,15 +129,23 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function buildLocationRef(src) {
+    const orderedRange = (start, end) => {
+      if (start == null || start === '') return ['', ''];
+      if (end == null || end === '') return [start, start];
+      return Number(start) <= Number(end) ? [start, end] : [end, start];
+    };
     const ft = (src.file_type || '').toLowerCase();
-    if (ft === 'md' && src.section_name && src.line_start != null && src.line_end != null) return `\u00a7 ${esc(src.section_name)} \u00b7 Lines ${src.line_start}\u2013${src.line_end}`;
+    const [rowStart, rowEnd] = orderedRange(src.row_start, src.row_end);
+    const [lineStart, lineEnd] = orderedRange(src.line_start, src.line_end);
+    const [pageStart, pageEnd] = orderedRange(src.page_index, src.page_end);
+    if (ft === 'md' && src.section_name && lineStart && lineEnd && lineStart !== lineEnd) return `\u00a7 ${esc(src.section_name)} \u00b7 Lines ${lineStart}\u2013${lineEnd}`;
     if (ft === 'md' && src.section_name) return `\u00a7 ${esc(src.section_name)}`;
     if ((ft === 'pptx' || ft === 'ppt') && src.slide_index != null) return `Slide ${src.slide_index}`;
-    if ((ft === 'xlsx' || ft === 'xls') && src.row_start != null) return `${src.sheet_name ? `${esc(src.sheet_name)} · ` : ''}Line number ${src.row_start}`;
-    if (ft === 'csv' && src.row_start != null) return `Line number ${src.row_start}`;
-    if (ft === 'txt' && src.line_start != null) return `Lines ${src.line_start}\u2013${src.line_end}`;
-    if (src.page_index != null && src.page_end != null && src.page_end !== src.page_index) return `Page ${src.page_index}\u2013${src.page_end}`;
-    if (src.page_index != null) return `Page ${src.page_index}`;
+    if ((ft === 'xlsx' || ft === 'xls') && rowStart) return `${src.sheet_name ? `${esc(src.sheet_name)} · ` : ''}${rowStart !== rowEnd ? `Rows ${rowStart}\u2013${rowEnd}` : `Row ${rowStart}`}`;
+    if (ft === 'csv' && rowStart) return rowStart !== rowEnd ? `Rows ${rowStart}\u2013${rowEnd}` : `Row ${rowStart}`;
+    if (ft === 'txt' && lineStart) return lineStart !== lineEnd ? `Lines ${lineStart}\u2013${lineEnd}` : `Line ${lineStart}`;
+    if (pageStart && pageEnd && pageEnd !== pageStart) return `Page ${pageStart}\u2013${pageEnd}`;
+    if (pageStart) return `Page ${pageStart}`;
     return '';
   }
 
@@ -165,11 +173,13 @@ document.addEventListener('DOMContentLoaded', () => {
       return html;
     }
 
+    if (chatMode !== 'rag') return html;
+
     displaySources(sources).forEach((src) => {
       const ref = buildLocationRef(src);
       const fileLabel = esc(src.file_name || '');
       const sourceLabel = canPreviewSource(src)
-        ? `<button type="button" class="rag-source-btn" data-file-id="${src.file_id || ''}" data-file-type="${src.file_type || ''}" data-page="${src.page_index || ''}" data-slide="${src.slide_index || ''}" data-sheet="${esc(src.sheet_name || '')}" data-row-start="${src.row_start || ''}" data-line-start="${src.line_start || ''}" data-line-end="${src.line_end || ''}" data-section="${esc(src.section_name || '')}" data-fname="${fileLabel}" data-highlight="" onclick="openSourceViewer(this)">${fileLabel}</button>`
+        ? `<button type="button" class="rag-source-btn" data-file-id="${src.file_id || ''}" data-file-type="${src.file_type || ''}" data-page="${src.page_index || ''}" data-page-end="${src.page_end || ''}" data-slide="${src.slide_index || ''}" data-sheet="${esc(src.sheet_name || '')}" data-row-start="${src.row_start || ''}" data-line-start="${src.line_start || ''}" data-line-end="${src.line_end || ''}" data-section="${esc(src.section_name || '')}" data-fname="${fileLabel}" data-highlight="" onclick="openSourceViewer(this)">${fileLabel}</button>`
         : `<span class="rag-source-static">${fileLabel}</span>`;
       html += ` <span class="msg-sep">|</span><span class="msg-source">${sourceLabel}${ref ? ` &middot; ${ref}` : ''}</span>`;
     });
@@ -315,7 +325,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const msg = data.message;
-      const imagesHtml = generatedImages(msg.sources).map((src) => `<div class="generated-image-wrap"><img src="${esc(src.image_url || src.link || '')}" class="answer-image" alt="${esc(src.title || 'Generated image')}"></div>`).join('');
+      const imagesHtml = generatedImages(msg.sources).map((src) => `<div class="generated-image-wrap"><img src="${esc(src.image_url || src.link || '')}" class="answer-image previewable-image" alt="${esc(src.title || 'Generated image')}" data-image-url="${esc(src.image_url || src.link || '')}" data-image-title="${esc(src.title || 'Generated image')}"></div>`).join('');
 
       typingWrapper.insertAdjacentHTML('beforebegin', `
         <div class="message msg-ai">
@@ -355,14 +365,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const imgEl = document.getElementById('sv-image');
     const textEl = document.getElementById('sv-text');
     const errEl = document.getElementById('sv-error');
+    const downloadEl = document.getElementById('sv-download');
+    const orderedRange = (start, end) => {
+      if (!start) return ['', ''];
+      if (!end) return [start, start];
+      return Number(start) <= Number(end) ? [start, end] : [end, start];
+    };
 
     const highlight = btn.dataset.highlight || '';
     let locLabel = '';
-    if (btn.dataset.page) locLabel = `Page ${btn.dataset.page}`;
+    if (btn.dataset.page) {
+      const [pageStart, pageEnd] = orderedRange(btn.dataset.page, btn.dataset.pageEnd);
+      locLabel = pageEnd && pageEnd !== pageStart ? `Page ${pageStart}\u2013${pageEnd}` : `Page ${pageStart}`;
+    }
     else if (btn.dataset.slide) locLabel = `Slide ${btn.dataset.slide}`;
     else if (btn.dataset.sheet) locLabel = `Sheet: ${btn.dataset.sheet}`;
     else if (btn.dataset.section) locLabel = `\u00a7 ${btn.dataset.section}`;
-    else if (btn.dataset.lineStart) locLabel = `Lines ${btn.dataset.lineStart}\u2013${btn.dataset.lineEnd || btn.dataset.lineStart}`;
+    else if (btn.dataset.lineStart) {
+      const [lineStart, lineEnd] = orderedRange(btn.dataset.lineStart, btn.dataset.lineEnd);
+      locLabel = lineEnd && lineEnd !== lineStart ? `Lines ${lineStart}\u2013${lineEnd}` : `Line ${lineStart}`;
+    }
     titleEl.textContent = locLabel ? `${btn.dataset.fname} · ${locLabel}` : btn.dataset.fname;
 
     modal.style.display = 'flex';
@@ -370,6 +392,8 @@ document.addEventListener('DOMContentLoaded', () => {
     imgEl.style.display = 'none';
     textEl.style.display = 'none';
     errEl.style.display = 'none';
+    downloadEl.hidden = true;
+    downloadEl.removeAttribute('href');
 
     const params = new URLSearchParams({
       file_id: btn.dataset.fileId,
@@ -396,6 +420,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.source_type === 'page') {
           imgEl.src = data.image_url;
           imgEl.style.display = 'block';
+          downloadEl.href = data.image_url;
+          downloadEl.download = btn.dataset.fname || 'preview';
+          downloadEl.hidden = false;
         } else {
           textEl.textContent = data.content_text;
           textEl.style.display = 'block';
@@ -408,7 +435,33 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   };
 
+  window.openImageViewer = function(imageUrl, title) {
+    const modal = document.getElementById('source-viewer-modal');
+    const titleEl = document.getElementById('sv-title');
+    const spinner = document.getElementById('sv-spinner');
+    const imgEl = document.getElementById('sv-image');
+    const textEl = document.getElementById('sv-text');
+    const errEl = document.getElementById('sv-error');
+    const downloadEl = document.getElementById('sv-download');
+
+    titleEl.textContent = title || 'Generated image';
+    modal.style.display = 'flex';
+    spinner.style.display = 'none';
+    textEl.style.display = 'none';
+    errEl.style.display = 'none';
+    imgEl.src = imageUrl;
+    imgEl.style.display = 'block';
+    downloadEl.href = imageUrl;
+    downloadEl.download = (title || 'generated-image').replace(/\s+/g, '-').toLowerCase();
+    downloadEl.hidden = false;
+  };
+
   document.addEventListener('click', (event) => {
+    const imageTarget = event.target.closest('.previewable-image');
+    if (imageTarget) {
+      window.openImageViewer(imageTarget.dataset.imageUrl || imageTarget.src, imageTarget.dataset.imageTitle || imageTarget.alt || 'Generated image');
+      return;
+    }
     if (event.target.closest('#sv-close') || event.target.id === 'sv-backdrop') {
       const modal = document.getElementById('source-viewer-modal');
       if (modal) modal.style.display = 'none';

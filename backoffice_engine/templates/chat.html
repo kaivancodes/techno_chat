@@ -151,8 +151,7 @@
             <div class="msg-meta">
               <span class="msg-model">{{ msg.model_used }}</span>
 
-              {% for src in msg.sources %}
-              {% if src.kind != 'generated_image' and src.kind != 'uploaded_image' %}
+              {% for src in msg.display_sources %}
               <span class="msg-sep">|</span>
 
               {% if msg.chat_mode == 'web_search' %}
@@ -175,32 +174,19 @@
                         class="rag-source-btn"
                         data-file-id="{{ src.file_id }}"
                         data-file-type="{{ src.file_type }}"
-                        data-page="{{ src.page_index }}"
+                        data-page="{{ src.page_range_start }}"
+                        data-page-end="{{ src.page_range_end }}"
                         data-slide="{{ src.slide_index }}"
                         data-sheet="{{ src.sheet_name }}"
-                        data-row-start="{{ src.row_start }}"
-                        data-line-start="{{ src.line_start }}"
-                        data-line-end="{{ src.line_end }}"
+                        data-row-start="{{ src.row_range_start }}"
+                        data-line-start="{{ src.line_range_start }}"
+                        data-line-end="{{ src.line_range_end }}"
                         data-section="{{ src.section_name }}"
-                        data-fname="{{ src.file_name }}"
+                        data-fname="{{ src.display_file_name }}"
                         data-highlight="{{ src.highlight_text }}"
-                        onclick="openSourceViewer(this)">{{ src.file_name }}</button>
-                {% if src.file_type == "md" and src.section_name %}
-                  &middot; &sect; {{ src.section_name }}{% if src.line_start and src.line_end %} &middot; Lines {{ src.line_start }}&ndash;{{ src.line_end }}{% endif %}
-                {% elif src.file_type == "pptx" or src.file_type == "ppt" %}
-                  {% if src.slide_index %}&middot; Slide {{ src.slide_index }}{% endif %}
-                {% elif src.file_type == "xlsx" or src.file_type == "xls" %}
-                  {% if src.sheet_name %}&middot; {{ src.sheet_name }}{% endif %}
-                  {% if src.row_start and src.row_end %}&middot; Lines {{ src.row_start }}&ndash;{{ src.row_end }}{% endif %}
-                {% elif src.file_type == "csv" %}
-                  {% if src.row_start and src.row_end %}&middot; Lines {{ src.row_start }}&ndash;{{ src.row_end }}{% endif %}
-                {% elif src.file_type == "txt" %}
-                  {% if src.line_start %}&middot; Lines {{ src.line_start }}&ndash;{{ src.line_start|add:49 }}{% endif %}
-                {% elif src.page_index %}
-                  &middot; Page {{ src.page_index }}{% if src.page_end and src.page_end != src.page_index %}&ndash;{{ src.page_end }}{% endif %}
-                {% endif %}
+                        onclick="openSourceViewer(this)">{{ src.display_file_name }}</button>
+                {% if src.display_ref %}&middot; {{ src.display_ref }}{% endif %}
               </span>
-              {% endif %}
               {% endif %}
               {% endfor %}
             </div>
@@ -209,7 +195,7 @@
               {% for src in msg.sources %}
                 {% if src.kind == 'generated_image' %}
                 <div class="generated-image-wrap">
-                  <img src="{{ src.image_url|default:src.link }}" class="answer-image" alt="{{ src.title|default:'Generated image' }}">
+                  <img src="{{ src.image_url|default:src.link }}" class="answer-image previewable-image" alt="{{ src.title|default:'Generated image' }}" data-image-url="{{ src.image_url|default:src.link }}" data-image-title="{{ src.title|default:'Generated image' }}">
                 </div>
                 {% endif %}
               {% endfor %}
@@ -280,14 +266,17 @@
   <div class="sv-panel">
     <div class="sv-header">
       <span id="sv-title" class="sv-title">Source Preview</span>
-      <button type="button" class="sv-close" id="sv-close" aria-label="Close">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2.5"
-             stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"/>
-          <line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
+      <div class="sv-actions">
+        <a href="#" id="sv-download" class="sv-download" download hidden>Download</a>
+        <button type="button" class="sv-close" id="sv-close" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
     </div>
     <div class="sv-body" id="sv-body">
       <div id="sv-spinner" class="sv-spinner" style="display:none;">

@@ -312,7 +312,7 @@ class KieImageClient:
 
     def _uses_4o_endpoint(self, model: str) -> bool:
         lowered = (model or "").lower()
-        return lowered == "4o-image-api" or "4o-image" in lowered
+        return lowered == "4o-image-api" or "4o-image" in lowered or "gpt-image" in lowered
 
     @retry_on_network()
     def _upload_data_url(self, data_url: str, file_name: str = "input-image.png") -> str:
