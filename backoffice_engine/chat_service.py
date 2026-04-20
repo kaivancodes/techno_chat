@@ -34,7 +34,7 @@ from .query_service import (
     split_multi_question,
     strip_offensive_language,
 )
-from .page_render_service import get_page_render
+from .page_render_service import get_visual_render
 from .retrieval_service import retrieve_query_variations
 from .response_parsing_service import extract_json_candidate, parse_json_dict
 from .schemas import SourceEntry
@@ -96,13 +96,15 @@ def _calculate_confidence(chunks: list) -> float:
 def _extract_source_image(chunk: dict) -> str:
     try:
         file_id = chunk.get("file_id")
-        page_index = chunk.get("page_index")
         file_type = (chunk.get("normalized_file_type") or chunk.get("file_type") or "").lower()
-        if not file_id or not page_index or file_type != "pdf":
+        if not file_id or file_type not in {"pdf", "doc", "docx", "ppt", "pptx", "image", "png", "jpg", "jpeg", "webp", "svg"}:
             return ""
-        if "[Image" not in (chunk.get("text") or ""):
-            return ""
-        return get_page_render(file_id=file_id, page_index=page_index, highlight_text="")
+        return get_visual_render(
+            file_id=file_id,
+            file_type=file_type,
+            page_index=chunk.get("page_index"),
+            slide_index=chunk.get("slide_index"),
+        )
     except Exception:
         return ""
 
@@ -217,6 +219,7 @@ def _build_sources(chunks: list[dict], query: str, answer: str, max_sources: int
         image_url = _extract_source_image(chunk)
         if image_url:
             entry["image_url"] = image_url
+            entry["page_render_image_path"] = image_url
 
         sources.append(entry)
         if len(sources) >= max_sources:
@@ -446,9 +449,9 @@ def build_chat_prompt(query: str, file_ids: list, chat_history: list, model_name
         max_per_location = 4
         preserve_source_order = True
     elif is_list_mode:
-        max_chunks = 36 if wants_full_coverage else 20
-        token_budget = 12000 if wants_full_coverage else 8000
-        max_per_location = 6
+        max_chunks = 48 if wants_full_coverage else 36
+        token_budget = 16000 if wants_full_coverage else 12000
+        max_per_location = 8
         preserve_source_order = True
     elif is_numeric_mode:
         max_chunks = 18

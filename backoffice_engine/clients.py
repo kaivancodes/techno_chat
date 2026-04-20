@@ -312,7 +312,7 @@ class KieImageClient:
 
     def _uses_4o_endpoint(self, model: str) -> bool:
         lowered = (model or "").lower()
-        return lowered == "4o-image-api" or "4o-image" in lowered or "gpt-image" in lowered
+        return lowered == "4o-image-api" or "4o-image" in lowered
 
     @retry_on_network()
     def _upload_data_url(self, data_url: str, file_name: str = "input-image.png") -> str:
@@ -378,7 +378,9 @@ class KieImageClient:
             timeout=30,
         )
         response.raise_for_status()
-        task_id = ((response.json().get("data") or {}).get("task_id"))
+        payload = response.json()
+        data = payload.get("data") or {}
+        task_id = data.get("task_id") or data.get("taskId") or payload.get("task_id") or payload.get("taskId")
         if not task_id:
             raise ValueError("KIE task creation failed.")
         return task_id
@@ -508,8 +510,6 @@ class KieImageClient:
         if self._uses_4o_endpoint(self.text_model):
             task_id = self._create_4o_image_task(prompt)
             return self._wait_for_4o_output(task_id)
-        if (self.text_model or "").lower().startswith("gpt"):
-            return self._create_gpt_image(prompt)
         task_id = self._create_task(self.text_model, {"prompt": prompt})
         return self._wait_for_output(task_id)
 

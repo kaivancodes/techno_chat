@@ -20,7 +20,7 @@ from PIL import Image
 from pptx import Presentation
 from pptx.util import Inches as PptxInches
 
-from backoffice_engine import ai_assistant_service, chat_service, document_reader, image_generation_service, web_search_service
+from backoffice_engine import admin_views, ai_assistant_service, chat_service, clients, document_reader, image_generation_service, web_search_service
 from backoffice_engine.admin_auth import create_admin
 from backoffice_engine.choices import FileProcessingStatus, FileType, SessionType
 from backoffice_engine.conversation_state_service import get_last_active_chat_session_id
@@ -808,10 +808,14 @@ class ImageGenerationTests(BaseTechnoChatTestCase):
         client.text_to_image.return_value = ["https://img.example/generated.png"]
         client.image_to_image.return_value = ["https://img.example/edited.png"]
 
-        with patch("backoffice_engine.image_generation_service.KieImageClient", return_value=client):
+        with patch("backoffice_engine.image_generation_service.KieImageClient", return_value=client), patch(
+            "backoffice_engine.image_generation_service.save_generated_image",
+            return_value=("/media/page_renders/generated.png", "/tmp/generated.png"),
+        ):
             generated = image_generation_service.build_image_generation_prompt("Create a mountain scene", request)
-        self.assertEqual(generated["image_urls"][0], "https://img.example/generated.png")
+        self.assertEqual(generated["image_urls"][0], "/media/page_renders/generated.png")
         self.assertEqual(generated["sources"][0]["kind"], "generated_image")
+        self.assertEqual(generated["selected_model"], "GPT 1.5 Image")
 
         with patch("backoffice_engine.image_generation_service.KieImageClient", return_value=client), patch(
             "backoffice_engine.image_generation_service.save_uploaded_image",
@@ -819,10 +823,15 @@ class ImageGenerationTests(BaseTechnoChatTestCase):
         ), patch(
             "backoffice_engine.image_generation_service.uploaded_image_to_data_uri",
             return_value="data:image/png;base64,abc",
+        ), patch(
+            "backoffice_engine.image_generation_service.save_generated_image",
+            return_value=("/media/page_renders/edited.png", "/tmp/edited.png"),
         ):
             edited = image_generation_service.build_image_generation_prompt("Add warm lighting", request, upload)
         self.assertEqual(edited["answer"], "Here is the edited image.")
         self.assertEqual(edited["sources"][0]["kind"], "uploaded_image")
+        self.assertEqual(edited["sources"][1]["link"], "/media/page_renders/edited.png")
+        self.assertEqual(edited["selected_model"], "GPT 1 Image")
 
     def test_tc_img_05_and_06_chat_send_view_rejects_wrong_mode_and_missing_prompt(self):
         user, _ = self.create_contributor(email="img@technostacks.com", username="img.user")
@@ -867,6 +876,34 @@ class ImageGenerationTests(BaseTechnoChatTestCase):
             with self.assertRaises(ChatResponseError) as exc:
                 image_generation_service.build_image_generation_prompt("Create art", request)
         self.assertIn("not configured properly", exc.exception.user_message)
+
+    def test_tc_img_text_model_uses_standard_task_endpoint_for_gpt_15(self):
+        client = clients.KieImageClient(api_key="key")
+        client.text_model = "gpt-image/1.5-text-to-image"
+
+        with patch.object(client, "_create_task", return_value="task-123") as create_task_mock, patch.object(
+            client, "_wait_for_output", return_value=["https://img.example/generated.png"]
+        ) as wait_mock, patch.object(client, "_create_4o_image_task") as create_4o_mock:
+            result = client.text_to_image("Create a poster")
+
+        self.assertEqual(result, ["https://img.example/generated.png"])
+        create_task_mock.assert_called_once_with("gpt-image/1.5-text-to-image", {"prompt": "Create a poster"})
+        wait_mock.assert_called_once_with("task-123")
+        create_4o_mock.assert_not_called()
+
+
+class AdminSourceFormattingTests(SimpleTestCase):
+    def test_tc_admin_generated_image_source_uses_preview_href_and_saved_path_label(self):
+        rendered = str(admin_views._format_sources_for_edit([
+            {
+                "kind": "generated_image",
+                "local_path": "/media/page_renders/generated.png",
+                "saved_file_path": "/tmp/media/page_renders/generated.png",
+            }
+        ], chat_mode="image_generation"))
+
+        self.assertIn('href="/media/page_renders/generated.png"', rendered)
+        self.assertIn("/tmp/media/page_renders/generated.png", rendered)
 
 
 class SessionAndChatManagementTests(BaseTechnoChatTestCase):
@@ -1196,7 +1233,7 @@ class UINavigationTests(BaseTechnoChatTestCase):
         admin_dash_html = (Path(settings.BASE_DIR) / "backoffice_engine" / "templates" / "admin" / "admin_dashboard.html").read_text(encoding="utf-8")
 
         self.assertIn("profileDropdown.classList.toggle('show')", base_js)
-        self.assertIn("localStorage.setItem('tc_theme', theme)", base_js)
+        self.assertIn("localStorage.setItem(themeStorageKey, theme)", base_js)
         self.assertIn("zone.classList.toggle('active')", upload_js)
         self.assertIn("btnSend.disabled = chatInput.value.trim() === '' && !pendingImageFile;", chat_js)
         self.assertIn("Math.min(this.scrollHeight, 160)", chat_js)
@@ -1209,6 +1246,16 @@ class UINavigationTests(BaseTechnoChatTestCase):
         self.assertIn("setupToggle('e-pw-toggle-contrib'", admin_dash_js)
         self.assertIn("m-r-len", admin_dash_html)
         self.assertIn("History", admin_dash_html)
+
+    def test_tc_ui_theme_keys_and_root_redirect_are_site_scoped(self):
+        base_template = (Path(settings.BASE_DIR) / "backoffice_engine" / "templates" / "base.html").read_text(encoding="utf-8")
+        admin_base_template = (Path(settings.BASE_DIR) / "backoffice_engine" / "templates" / "admin" / "admin_base.html").read_text(encoding="utf-8")
+        self.assertIn('data-theme-storage-key="tc_theme_user"', base_template)
+        self.assertIn('data-theme-storage-key="tc_theme_admin"', admin_base_template)
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.endswith("/login/"))
 
 
 class AdminModelAndHelperSmokeTests(BaseTechnoChatTestCase):

@@ -427,8 +427,8 @@
             <td><a href="?section={{ section }}&edit_id={{ rec.id }}" class="row-link">{{ rec.question|truncatechars:50 }}</a></td>
             <td>{{ rec.session.user.email }}</td>
             <td>{{ rec.created_at|date:"d-m-Y H:i" }}</td>
-            <td>{{ rec.model_used }}</td>
-            <td>{{ rec.chat_mode }}</td>
+            <td>{{ rec.model_used_display }}</td>
+            <td>{{ rec.chat_mode_display }}</td>
             {% endif %}
             <td class="text-center checkbox-cell"><input type="checkbox" class="row-cb" name="record_ids"
                 value="{{ rec.id }}" aria-label="Select row {{ rec.id }}"></td>

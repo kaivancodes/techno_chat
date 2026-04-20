@@ -9,12 +9,15 @@ from django.db.models import Prefetch
 from django.http import HttpRequest
 from django.db import IntegrityError
 from django.utils.text import capfirst
+from django.utils.html import format_html, format_html_join
+from django.utils.safestring import mark_safe
 from django.contrib.admin.models import ADDITION, CHANGE, DELETION, LogEntry
 
 from backoffice_engine.models import AdminUser, AdminProfile, User, UserProfile, File, ChatSession, ChatMessage, check_username
 from backoffice_engine.admin_auth import create_admin, _check_email_domain, _check_password_strength
 from backoffice_engine.choices import AdminTeamChoices, ContributorTeamChoices, SessionType, FileProcessingStatus
 from backoffice_engine.constants import CHAT_MODE_AI_ASSISTANT, CHAT_MODE_IMAGE_GENERATION, CHAT_MODE_RAG, CHAT_MODE_WEB_SEARCH
+from backoffice_engine.page_render_service import get_visual_render
 
 CHAT_MODE_CHOICES = (
     (CHAT_MODE_AI_ASSISTANT, "AI Assistant"),
@@ -32,6 +35,18 @@ SECTION_ORDER = (
     "sessions",
     "messages",
 )
+
+CHAT_MODE_DISPLAY_MAP = {
+    CHAT_MODE_RAG: "RAG",
+    CHAT_MODE_WEB_SEARCH: "Web Search",
+    CHAT_MODE_IMAGE_GENERATION: "Image Generation",
+    CHAT_MODE_AI_ASSISTANT: "AI Assistant",
+}
+
+MODEL_DISPLAY_MAP = {
+    "gpt-image/1.5-text-to-image": "GPT 1.5 Image",
+    "4o-image-api": "GPT 1 Image",
+}
 
 
 # =========================
@@ -310,9 +325,42 @@ def _format_source_location(item: dict) -> str:
     if item.get("page_index") is not None:
         page_start, page_end = _ordered_range(item.get("page_index"), item.get("page_end"))
         if page_start is not None and page_end is not None and page_end != page_start:
-            return f"page {page_start}-{page_end}"
-        return f"page {page_start}"
+            return f"Pages {page_start}–{page_end}"
+        return f"Page {page_start}"
     return ""
+
+
+def _chat_mode_display(value: str) -> str:
+    return CHAT_MODE_DISPLAY_MAP.get(value, value or "-")
+
+
+def _model_used_display(value: str) -> str:
+    return MODEL_DISPLAY_MAP.get((value or "").strip().lower(), value or "-")
+
+
+def _source_display_label(item: dict, file_name: str) -> str:
+    location = _format_source_location(item)
+    return f"{file_name} · {location}" if file_name and location else (file_name or location or "Source")
+
+
+def _resolve_rag_preview_link(item: dict) -> str:
+    preview_link = (item.get("page_render_image_path") or item.get("image_url") or "").strip()
+    if preview_link:
+        return preview_link
+
+    file_id = item.get("file_id")
+    file_type = item.get("file_type", "")
+    if not file_id:
+        return ""
+    try:
+        return get_visual_render(
+            file_id=file_id,
+            file_type=file_type,
+            page_index=item.get("page_index"),
+            slide_index=item.get("slide_index"),
+        )
+    except Exception:
+        return ""
 
 
 def _format_sources_for_edit(sources, chat_mode: str = ""):
@@ -331,19 +379,23 @@ def _format_sources_for_edit(sources, chat_mode: str = ""):
     if not isinstance(sources, list):
         return "[]"
 
-    if chat_mode in {CHAT_MODE_AI_ASSISTANT, CHAT_MODE_IMAGE_GENERATION}:
-        return "[]"
-
     formatted = []
     for item in sources:
         if isinstance(item, dict):
             kind = item.get("kind", "")
-            if kind in {"generated_image", "uploaded_image"}:
+            if kind == "uploaded_image":
                 continue
 
             link = item.get("link", "").strip()
-            if link:
-                formatted.append(link)
+            if kind == "generated_image":
+                preview_path = item.get("local_path") or link or item.get("image_url") or ""
+                saved_file_path = item.get("saved_file_path") or preview_path
+                if preview_path:
+                    formatted.append((preview_path, saved_file_path))
+                continue
+
+            if chat_mode in {CHAT_MODE_AI_ASSISTANT, CHAT_MODE_WEB_SEARCH} and link:
+                formatted.append((link, link))
                 continue
 
             file_name = item.get("file_name", "").strip()
@@ -353,15 +405,19 @@ def _format_sources_for_edit(sources, chat_mode: str = ""):
                 if file_object:
                     file_name = (file_object.original_filename or getattr(file_object.file, "name", "") or file_name).strip()
             if file_name:
-                location = _format_source_location(item)
-                formatted.append(f"{file_name} {location}".strip())
+                preview_link = _resolve_rag_preview_link(item)
+                formatted.append((preview_link, _source_display_label(item, file_name)))
         elif isinstance(item, str):
-            formatted.append(item)
+            formatted.append((item, item))
 
     if not formatted:
         return "[]"
 
-    return ", ".join(formatted)
+    return format_html_join(
+        mark_safe("<br>"),
+        '<a href="{}" target="_blank" rel="noopener noreferrer" class="row-link">{}</a>',
+        ((href or "#", label) for href, label in formatted),
+    )
 
 
 def _history_entries_for_object(obj):
@@ -663,7 +719,15 @@ def _prepare_context(section, records, edit_record=None, show_history=False):
         }
     }
 
+    if section == "messages" and records is not None:
+        for record in records:
+            record.chat_mode_display = _chat_mode_display(getattr(record, "chat_mode", ""))
+            record.model_used_display = _model_used_display(getattr(record, "model_used", ""))
+
     if edit_record is not None:
+        if section == "messages":
+            edit_record.chat_mode_display = _chat_mode_display(getattr(edit_record, "chat_mode", ""))
+            edit_record.model_used_display = _model_used_display(getattr(edit_record, "model_used", ""))
         file_choices = []
         if section == "sessions":
             file_choices = edit_record.files.all().order_by("original_filename", "id")

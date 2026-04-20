@@ -1,4 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const themeStorageKey = document.documentElement.dataset.themeStorageKey || 'tc_theme';
+  const prefersLightQuery = window.matchMedia('(prefers-color-scheme: light)');
 
   /* ═══════════════════════════
      PROFILE DROPDOWN
@@ -35,14 +37,14 @@ document.addEventListener('DOMContentLoaded', () => {
      THEME TOGGLE
   ═══════════════════════════ */
   const themeBtns  = document.querySelectorAll('.tbtn');
-  const savedTheme = localStorage.getItem('tc_theme') || 'dark';
+  const savedTheme = localStorage.getItem(themeStorageKey) || 'dark';
   applyTheme(savedTheme);
 
   themeBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const theme = btn.getAttribute('data-theme');
       applyTheme(theme);
-      localStorage.setItem('tc_theme', theme);
+      localStorage.setItem(themeStorageKey, theme);
     });
   });
 
@@ -52,15 +54,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (active) active.classList.add('on');
 
     if (theme === 'system') {
-      const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+      const prefersLight = prefersLightQuery.matches;
       document.documentElement.setAttribute('data-theme', prefersLight ? 'light' : 'dark');
     } else {
       document.documentElement.setAttribute('data-theme', theme);
     }
   }
 
-  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
-    if (localStorage.getItem('tc_theme') === 'system') {
+  prefersLightQuery.addEventListener('change', (e) => {
+    if (localStorage.getItem(themeStorageKey) === 'system') {
       document.documentElement.setAttribute('data-theme', e.matches ? 'light' : 'dark');
     }
   });

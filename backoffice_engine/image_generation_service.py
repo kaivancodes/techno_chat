@@ -4,14 +4,19 @@ image_generation_service.py
 Text-to-image and image-to-image orchestration.
 """
 
+from .helpers import filename_from_url
 from .clients import KieImageClient
 from .constants import CHAT_MODE_IMAGE_GENERATION
 from .exceptions import ChatResponseError
-from .image_processing_service import save_uploaded_image, uploaded_image_to_data_uri
+from .image_processing_service import save_generated_image, save_uploaded_image, uploaded_image_to_data_uri
 from techno_chat.settings import logger
 
 
-def build_image_generation_prompt(query: str, request, uploaded_image=None) -> dict:
+def _display_model_name(model_name: str, is_edit: bool) -> str:
+    return "GPT 1 Image" if is_edit else "GPT 1.5 Image"
+
+
+def build_image_generation_prompt(query: str, request, uploaded_image=None, file_ids: list | None = None, conversation_state: dict | None = None, chat_history: list | None = None) -> dict:
     if not query:
         raise ChatResponseError("Please enter a prompt before sending.")
 
@@ -20,6 +25,7 @@ def build_image_generation_prompt(query: str, request, uploaded_image=None) -> d
         raise ChatResponseError("Image generation is not configured properly.")
     image_urls = []
     sources = []
+    prompt_query = query
 
     try:
         if uploaded_image is not None:
@@ -34,19 +40,19 @@ def build_image_generation_prompt(query: str, request, uploaded_image=None) -> d
                 "build_image_generation_prompt | image_inputs count=%s | edit_model=%s",
                 len(image_inputs), client.edit_model,
             )
-            image_urls = client.image_to_image(query, image_inputs)
+            image_urls = client.image_to_image(prompt_query, image_inputs)
             sources.append({
                 "kind": "uploaded_image",
                 "title": "Input Image",
                 "link": public_url,
                 "image_url": relative_url,
             })
-            selected_model = client.edit_model
+            selected_model = _display_model_name(client.edit_model, is_edit=True)
             answer = "Here is the edited image."
         else:
             logger.info("build_image_generation_prompt | mode=text_to_image")
-            image_urls = client.text_to_image(query)
-            selected_model = client.text_model
+            image_urls = client.text_to_image(prompt_query)
+            selected_model = _display_model_name(client.text_model, is_edit=False)
             answer = "Here is the generated image."
     except TimeoutError as exc:
         logger.error("build_image_generation_prompt | TimeoutError: %s", exc)
@@ -58,12 +64,23 @@ def build_image_generation_prompt(query: str, request, uploaded_image=None) -> d
     if not image_urls:
         raise ChatResponseError("Image generation failed. Please try again.")
 
+    saved_image_urls = []
     for index, url in enumerate(image_urls, start=1):
+        try:
+            local_url, saved_file_path = save_generated_image(url)
+        except Exception as exc:
+            logger.warning("build_image_generation_prompt | generated image save failed | raw=%s", exc)
+            local_url = url
+            saved_file_path = ""
+        saved_image_urls.append(local_url)
         sources.append({
             "kind": "generated_image",
-            "title": f"Generated Image {index}",
-            "link": url,
-            "image_url": url,
+            "title": filename_from_url(local_url, fallback=f"generated-image-{index}.png"),
+            "link": local_url,
+            "image_url": local_url,
+            "download_url": local_url,
+            "local_path": local_url,
+            "saved_file_path": saved_file_path,
         })
 
     return {
@@ -72,7 +89,7 @@ def build_image_generation_prompt(query: str, request, uploaded_image=None) -> d
         "is_greeting": False,
         "is_summary": False,
         "chat_mode": CHAT_MODE_IMAGE_GENERATION,
-        "image_urls": image_urls,
+        "image_urls": saved_image_urls,
         "selected_model": selected_model,
         "resolved_query": query,
     }

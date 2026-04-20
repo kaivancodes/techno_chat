@@ -7,6 +7,7 @@ Small utility functions used across the app.
 import re
 import functools
 import time
+from urllib.parse import urlsplit
 
 import fitz
 
@@ -87,6 +88,24 @@ def sanitise_filename(name: str) -> str:
     name = re.sub(r"_+", "_", name)
     name = name.strip("_")
     return name[:80]
+
+
+_URL_PATTERN = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
+
+
+def extract_urls_from_text(text: str) -> list[str]:
+    urls = []
+    for match in _URL_PATTERN.findall(text or ""):
+        cleaned = match.rstrip(").,;:!?]}>\"'")
+        if cleaned and cleaned not in urls:
+            urls.append(cleaned)
+    return urls
+
+
+def filename_from_url(url: str, fallback: str = "generated-image.png") -> str:
+    path = urlsplit(url or "").path
+    name = path.rsplit("/", 1)[-1].strip() if path else ""
+    return name or fallback
 
 
 def normalise_image(image_bytes: bytes, ext: str) -> tuple[bytes, str]:

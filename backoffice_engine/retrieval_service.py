@@ -6,6 +6,7 @@ Hybrid vector similarity search + reranking.
 
 from .clients import PineconeClient
 from .models import File
+from .query_service import build_query_variations, get_resolved_query_text
 from techno_chat.settings import (
     logger,
     RETRIEVAL_TOP_K,
@@ -199,6 +200,74 @@ def _select_primary_retrieval_query(query_variations: list[str]) -> str:
         return ""
     longest = max(query_variations, key=lambda item: len((item or "").strip()))
     return longest.strip()
+
+
+def _context_location_label(chunk: dict) -> str:
+    if chunk.get("page_index") is not None:
+        return f"Page {chunk['page_index']}"
+    if chunk.get("slide_index") is not None:
+        return f"Slide {chunk['slide_index']}"
+    if chunk.get("sheet_name"):
+        if chunk.get("row_start") is not None:
+            row_end = chunk.get("row_end") or chunk["row_start"]
+            return f"{chunk['sheet_name']} rows {chunk['row_start']}-{row_end}"
+        return chunk["sheet_name"]
+    if chunk.get("section_name"):
+        return chunk["section_name"]
+    if chunk.get("line_start") is not None:
+        line_end = chunk.get("line_end") or chunk["line_start"]
+        return f"Lines {chunk['line_start']}-{line_end}"
+    return ""
+
+
+def build_document_context_text(
+    query: str,
+    file_ids: list | None,
+    chat_history: list | None = None,
+    conversation_state: dict | None = None,
+    max_chunks: int = 4,
+    token_budget: int = 1400,
+) -> str:
+    if not file_ids:
+        return ""
+
+    state = conversation_state or {}
+    resolved_query = get_resolved_query_text(
+        query,
+        chat_history=chat_history or [],
+        active_topic=state.get("active_topic", ""),
+        active_entities=state.get("active_entities", []),
+    )
+    query_variations = build_query_variations(
+        query,
+        chat_history=chat_history or [],
+        active_topic=state.get("active_topic", ""),
+        active_entities=state.get("active_entities", []),
+    )
+    if not query_variations:
+        query_variations = [resolved_query or query]
+
+    chunks = retrieve_query_variations(
+        query_variations=query_variations,
+        file_ids=file_ids,
+        max_chunks=max_chunks,
+        token_budget=token_budget,
+        max_per_location=2,
+        preserve_source_order=True,
+    )
+    if not chunks:
+        return ""
+
+    sections = []
+    for chunk in chunks:
+        location_label = _context_location_label(chunk)
+        prefix = f"{chunk.get('file_name', '')} · {location_label}" if location_label else chunk.get("file_name", "")
+        text = (chunk.get("text") or "").strip()
+        if not text:
+            continue
+        sections.append(f"{prefix}\n{text[:320]}".strip())
+
+    return "\n\n".join(sections[:max_chunks])
 
 
 # ─────────────────────────────────────────────────────────────

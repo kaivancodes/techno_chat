@@ -123,6 +123,14 @@
 
 /* File table padding */
 .files-island .data-table { padding: 8px; }
+.files-island .data-table tbody tr { background: transparent; }
+.files-island .data-table tbody td {
+  background: var(--bg-card);
+  transition: background var(--transition);
+}
+.files-island .data-table tbody tr:hover td {
+  background: var(--bg-hover);
+}
 
 .files-island thead tr th:first-child { padding-left: 20px; }
 .files-island thead tr th:last-child  { padding-right: 20px; }

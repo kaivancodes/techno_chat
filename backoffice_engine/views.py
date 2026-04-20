@@ -117,7 +117,7 @@ def _format_chat_source_ref(source: dict) -> str:
     if source.get("page_index") is not None:
         start, end = _ordered_range(source.get("page_index"), source.get("page_end"))
         if start is not None and end is not None and start != end:
-            return f"Page {start}–{end}"
+            return f"Pages {start}–{end}"
         return f"Page {start}"
     return ""
 
@@ -141,6 +141,7 @@ def _prepare_sources_for_display(sources, chat_mode: str):
                 **src,
                 "display_ref": _format_chat_source_ref(src),
                 "display_file_name": src.get("file_name", ""),
+                "display_label": f"{src.get('file_name', '')} · {_format_chat_source_ref(src)}".strip(" ·"),
                 "page_range_start": _ordered_range(src.get("page_index"), src.get("page_end"))[0],
                 "page_range_end": _ordered_range(src.get("page_index"), src.get("page_end"))[1],
                 "line_range_start": _ordered_range(src.get("line_start"), src.get("line_end"))[0],
@@ -451,6 +452,9 @@ def chat_send_view(request, session_id):
                         query=query,
                         request=request,
                         uploaded_image=uploaded_image,
+                        file_ids=file_ids,
+                        conversation_state=conversation_state,
+                        chat_history=chat_history,
                     )
                 elif detected_intent == CHAT_MODE_AI_ASSISTANT:
                     result = build_ai_assistant_prompt(
@@ -458,6 +462,7 @@ def chat_send_view(request, session_id):
                         chat_history=chat_history,
                         model_name=model_name,
                         conversation_state=conversation_state,
+                        file_ids=file_ids,
                     )
                 elif detected_intent == CHAT_MODE_WEB_SEARCH:
                     result = build_web_search_prompt(
@@ -465,6 +470,7 @@ def chat_send_view(request, session_id):
                         model_name=model_name,
                         chat_history=chat_history,
                         conversation_state=conversation_state,
+                        file_ids=file_ids,
                     )
                 else:
                     result = build_chat_prompt(

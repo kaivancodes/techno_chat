@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-theme-storage-key="tc_theme_user">
 
 <head>
     <meta charset="UTF-8" />
@@ -10,7 +10,8 @@
     <link rel="stylesheet" href="{% static 'login.css' %}">
   <script>
     (function(){
-      var savedTheme = localStorage.getItem('tc_theme') || 'dark';
+      var storageKey = document.documentElement.dataset.themeStorageKey || 'tc_theme_user';
+      var savedTheme = localStorage.getItem(storageKey) || 'dark';
       if (savedTheme === 'system') {
         var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
         document.documentElement.setAttribute('data-theme', prefersLight ? 'light' : 'dark');

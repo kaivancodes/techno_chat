@@ -20,6 +20,8 @@ from .query_service import (
     split_multi_question,
     strip_offensive_language,
 )
+from .helpers import extract_urls_from_text
+from .retrieval_service import build_document_context_text
 from .response_parsing_service import extract_json_candidate, parse_json_dict
 from techno_chat.settings import GEMINI_LLM_MODELS, logger
 
@@ -28,7 +30,13 @@ GREETING_RESPONSE = "Hi! How can I help you today?"
 RESPECTFUL_RESPONSE = "Please keep our conversation respectful and I will be happy to help you."
 
 
-def build_ai_assistant_prompt(query: str, chat_history: list, model_name: str, conversation_state: dict | None = None) -> dict:
+def build_ai_assistant_prompt(
+    query: str,
+    chat_history: list,
+    model_name: str,
+    conversation_state: dict | None = None,
+    file_ids: list | None = None,
+) -> dict:
     logger.info("build_ai_assistant_prompt | query_len=%s model=%s", len(query), model_name)
 
     if should_refuse_for_abuse(query):
@@ -58,11 +66,17 @@ def build_ai_assistant_prompt(query: str, chat_history: list, model_name: str, c
     question_parts = split_multi_question(cleaned_query)
     llm = _select_llm(model_name)
     focus_context = _focus_context(state)
+    document_context = build_document_context_text(
+        query=cleaned_query,
+        file_ids=file_ids or [],
+        chat_history=chat_history,
+        conversation_state=state,
+    ) or "No active document context."
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", AI_ASSISTANT_SYSTEM_PROMPT),
         MessagesPlaceholder("chat_history"),
-        ("human", "Conversation focus: {focus_context}\nQuestion: {input}\nReturn valid JSON only with this shape:\n{{\"answer\": \"final answer here\"}}"),
+        ("human", "Conversation focus: {focus_context}\nDocument context: {document_context}\nQuestion: {input}\nReturn valid JSON only with this shape:\n{{\"answer\": \"final answer here\"}}"),
     ])
     chain = prompt | llm
 
@@ -90,15 +104,17 @@ def build_ai_assistant_prompt(query: str, chat_history: list, model_name: str, c
         response = chain.invoke({
             "input": resolved_query,
             "focus_context": focus_context,
+            "document_context": document_context,
             "chat_history": lc_history,
         })
         raw_answer = response.content if hasattr(response, "content") else str(response)
         answers.append(_parse_assistant_answer(raw_answer))
 
     final_answer = "\n\n".join(answer for answer in answers if answer).strip()
+    sources = [{"title": url, "link": url} for url in extract_urls_from_text(final_answer)]
     return {
         "answer": final_answer or "I’m not sure.",
-        "sources": [],
+        "sources": sources,
         "is_greeting": False,
         "is_summary": False,
         "chat_mode": CHAT_MODE_AI_ASSISTANT,

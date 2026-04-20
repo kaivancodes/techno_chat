@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-theme-storage-key="tc_theme_user">
 
 <head>
   <meta charset="UTF-8" />
@@ -8,7 +8,8 @@
   <title>{% block title %}TechnoChat{% endblock %}</title>
   <script>
     (function(){
-      var savedTheme = localStorage.getItem('tc_theme') || 'dark';
+      var storageKey = document.documentElement.dataset.themeStorageKey || 'tc_theme_user';
+      var savedTheme = localStorage.getItem(storageKey) || 'dark';
       if (savedTheme === 'system') {
         var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
         document.documentElement.setAttribute('data-theme', prefersLight ? 'light' : 'dark');
@@ -96,12 +97,14 @@
       </div>
     </header>
 
+    {% block page_shell %}
     <!-- ── Main Page Island ── -->
     <div class="main-island">
-      <div class="tc-main">
+      <div class="tc-main{% block tc_main_class %}{% endblock %}">
         {% block content %}{% endblock %}
       </div>
     </div>
+    {% endblock %}
 
     <footer class="home-footer">
       Copyright &copy; 2026–27 TechnoChat &reg;

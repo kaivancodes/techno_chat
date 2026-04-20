@@ -24,6 +24,11 @@ body, html {
   align-items: center;
   gap: 16px;
 }
+.admin-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
 .admin-tag {
   display: inline-flex;
   align-items: center;

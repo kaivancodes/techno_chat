@@ -19,6 +19,8 @@ from .query_service import (
     split_multi_question,
     strip_offensive_language,
 )
+from .helpers import extract_urls_from_text
+from .retrieval_service import build_document_context_text
 from .response_parsing_service import extract_json_candidate, parse_json_dict
 from techno_chat.settings import GEMINI_LLM_MODELS, logger
 
@@ -27,7 +29,13 @@ GREETING_RESPONSE = "Hi! How can I help you today?"
 RESPECTFUL_RESPONSE = "Please keep our conversation respectful and I will be happy to help you."
 
 
-def build_web_search_prompt(query: str, model_name: str, chat_history: list | None = None, conversation_state: dict | None = None) -> dict:
+def build_web_search_prompt(
+    query: str,
+    model_name: str,
+    chat_history: list | None = None,
+    conversation_state: dict | None = None,
+    file_ids: list | None = None,
+) -> dict:
     logger.info("build_web_search_prompt | query_len=%s model=%s", len(query), model_name)
 
     if should_refuse_for_abuse(query):
@@ -55,6 +63,14 @@ def build_web_search_prompt(query: str, model_name: str, chat_history: list | No
     state = conversation_state or {}
     question_parts = split_multi_question(cleaned_query)
     focus_context = _focus_context(state)
+    document_context = build_document_context_text(
+        query=cleaned_query,
+        file_ids=file_ids or [],
+        chat_history=chat_history or [],
+        conversation_state=state,
+        max_chunks=3,
+        token_budget=900,
+    )
 
     answers = []
     used_sources = []
@@ -86,7 +102,7 @@ def build_web_search_prompt(query: str, model_name: str, chat_history: list | No
         formatted_results = _format_results(results)
         response = llm.invoke([
             SystemMessage(content=WEB_SEARCH_SYNTHESIS_PROMPT.format(search_results=formatted_results)),
-            HumanMessage(content="Conversation focus: " + focus_context + "\nQuestion: " + question_part + "\nReturn valid JSON only with this shape:\n{{\"answer\": \"final answer here\", \"used_result_ids\": [1, 2]}}"),
+            HumanMessage(content="Conversation focus: " + focus_context + "\nDocument context: " + (document_context or "No active document context.") + "\nQuestion: " + question_part + "\nReturn valid JSON only with this shape:\n{{\"answer\": \"final answer here\", \"used_result_ids\": [1, 2]}}"),
         ])
         raw_answer = response.content if hasattr(response, "content") else str(response)
         parsed = _parse_web_answer(raw_answer)
@@ -97,6 +113,10 @@ def build_web_search_prompt(query: str, model_name: str, chat_history: list | No
                 used_sources.append(source)
 
     final_answer = "\n\n".join(answer for answer in answers if answer).strip()
+    for url in extract_urls_from_text(final_answer):
+        source = {"title": url, "link": url}
+        if source not in used_sources:
+            used_sources.append(source)
     return {
         "answer": final_answer or "I’m not sure.",
         "sources": used_sources[:3],
