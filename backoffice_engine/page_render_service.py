@@ -11,6 +11,7 @@ import fitz
 import hashlib
 import os
 import re
+import shutil
 import textwrap
 from pathlib import Path
 import openpyxl
@@ -150,28 +151,93 @@ def _visual_cache_path(file_id: int, key: str) -> Path:
     return cache_dir / f"{file_id}_{safe_key}.{PAGE_RENDER_FORMAT}"
 
 
+def _media_url_for_cached_name(file_name: str) -> str:
+    return settings.MEDIA_URL + f"page_renders/{file_name}"
+
+
+def _cache_path_for_original(file_id: int, key: str, extension: str) -> Path:
+    cache_dir = Path(settings.MEDIA_ROOT) / "page_renders"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    safe_key = re.sub(r"[^a-zA-Z0-9_.-]", "_", key)
+    normalized_ext = extension if extension.startswith(".") else f".{extension}"
+    return cache_dir / f"{file_id}_{safe_key}{normalized_ext}"
+
+
+def _stack_render_images(image_urls: list[str], output_path: Path) -> str:
+    images = []
+    try:
+        for url in image_urls:
+            if not url.startswith(settings.MEDIA_URL):
+                continue
+            relative_path = url[len(settings.MEDIA_URL):].lstrip("/")
+            absolute_path = Path(settings.MEDIA_ROOT) / relative_path
+            if not absolute_path.exists():
+                continue
+            with Image.open(absolute_path) as opened:
+                images.append(opened.convert("RGB"))
+
+        if not images:
+            raise PageRenderError(internal=f"Stack render failed. output={output_path.name} raw=no images")
+
+        max_width = max(image.width for image in images)
+        total_height = sum(image.height for image in images)
+        canvas = Image.new("RGB", (max_width, total_height), "#ffffff")
+        y = 0
+        for image in images:
+            x = max(0, (max_width - image.width) // 2)
+            canvas.paste(image, (x, y))
+            y += image.height
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(output_path)
+        return _media_url_for_cached_name(output_path.name)
+    finally:
+        for image in images:
+            try:
+                image.close()
+            except Exception:
+                continue
+
+
+def _render_pdf_range(file_id: int, page_start: int, page_end: int, highlight_text: str = "") -> str:
+    start, end = sorted((page_start, page_end))
+    cache_path = _visual_cache_path(file_id, f"pdf_p{start}_{end}_{highlight_text[:30]}")
+    if cache_path.exists():
+        return _media_url_for_cached_name(cache_path.name)
+    page_urls = [get_page_render(file_id=file_id, page_index=page_number, highlight_text=highlight_text) for page_number in range(start, end + 1)]
+    return _stack_render_images(page_urls, cache_path)
+
+
 def _render_docx_page(file_obj: File, page_index: int) -> str:
     cache_path = _visual_cache_path(file_obj.id, f"docx_p{page_index}")
     if cache_path.exists():
-        return settings.MEDIA_URL + f"page_renders/{cache_path.name}"
+        return _media_url_for_cached_name(cache_path.name)
 
     segments = docx_file_text(file_obj.file.path)
     if not segments:
         raise PageRenderError(internal=f"DOCX render failed. file_id={file_obj.id} page={page_index} raw=no segments")
 
     segment = next((item for item in segments if item.get("page_index") == page_index), None)
-    if segment is None:
-        segment = min(
-            segments,
-            key=lambda item: abs((item.get("page_index") or 1) - page_index),
-        )
-    body = segment.get("text", "").strip() or "No readable content was found on this page."
+    body = (segment or {}).get("text", "").strip()
+    if not body:
+        body = get_source_content(file_id=file_obj.id, file_type=file_obj.file_type, page_index=page_index).strip()
+    if not body:
+        body = "No readable content was found on this page."
     return _render_text_canvas(
         title=file_obj.original_filename or file_obj.file.name,
-        subtitle=f"Document page {segment.get('page_index') or page_index}",
+        subtitle=f"Document page {page_index}",
         body=body,
         output_path=cache_path,
     )
+
+
+def _render_docx_range(file_obj: File, page_start: int, page_end: int) -> str:
+    start, end = sorted((page_start, page_end))
+    cache_path = _visual_cache_path(file_obj.id, f"docx_p{start}_{end}")
+    if cache_path.exists():
+        return _media_url_for_cached_name(cache_path.name)
+    page_urls = [_render_docx_page(file_obj, page_number) for page_number in range(start, end + 1)]
+    return _stack_render_images(page_urls, cache_path)
 
 
 def _draw_boxed_text(draw, box, text, title_font, body_font, fill="#111827", outline="#cbd5e1"):
@@ -191,7 +257,7 @@ def _draw_boxed_text(draw, box, text, title_font, body_font, fill="#111827", out
 def _render_pptx_slide(file_obj: File, slide_index: int) -> str:
     cache_path = _visual_cache_path(file_obj.id, f"pptx_s{slide_index}")
     if cache_path.exists():
-        return settings.MEDIA_URL + f"page_renders/{cache_path.name}"
+        return _media_url_for_cached_name(cache_path.name)
 
     presentation = Presentation(file_obj.file.path)
     slide_pos = max(0, slide_index - 1)
@@ -236,23 +302,92 @@ def _render_pptx_slide(file_obj: File, slide_index: int) -> str:
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(cache_path)
-    return settings.MEDIA_URL + f"page_renders/{cache_path.name}"
+    return _media_url_for_cached_name(cache_path.name)
 
 
-def get_visual_render(file_id: int, file_type: str, page_index: int | None = None, slide_index: int | None = None) -> str:
+def _render_text_source_preview(
+    file_obj: File,
+    key: str,
+    subtitle: str,
+    body: str,
+) -> str:
+    cache_path = _visual_cache_path(file_obj.id, key)
+    if cache_path.exists():
+        return _media_url_for_cached_name(cache_path.name)
+    normalized_body = (body or "").strip() or "No readable content was found for this source."
+    return _render_text_canvas(
+        title=file_obj.original_filename or file_obj.file.name,
+        subtitle=subtitle,
+        body=normalized_body,
+        output_path=cache_path,
+    )
+
+
+def _render_direct_image(file_obj: File) -> str:
+    extension = Path(file_obj.file.path).suffix.lower() or ".png"
+    cache_path = _cache_path_for_original(file_obj.id, "source_image", extension)
+    if cache_path.exists():
+        return _media_url_for_cached_name(cache_path.name)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(file_obj.file.path, cache_path)
+    return _media_url_for_cached_name(cache_path.name)
+
+
+def get_visual_render(
+    file_id: int,
+    file_type: str,
+    page_index: int | None = None,
+    page_end: int | None = None,
+    slide_index: int | None = None,
+    line_start: int | None = None,
+    line_end: int | None = None,
+    section_name: str | None = None,
+) -> str:
     file_obj = File.objects.get(id=file_id)
     if not _file_exists(file_obj):
         raise PageRenderError(internal=f"Visual render failed. file_id={file_id} raw=missing file")
 
     normalized = normalize_file_type(file_type or file_obj.file_type or "", file_obj.original_filename or file_obj.file.name)
     if normalized == "pdf":
+        if page_index and page_end and page_end != page_index:
+            return _render_pdf_range(file_id=file_id, page_start=page_index, page_end=page_end, highlight_text="")
         return get_page_render(file_id=file_id, page_index=page_index or 1, highlight_text="")
     if normalized in {"doc", "docx"}:
+        if page_index and page_end and page_end != page_index:
+            return _render_docx_range(file_obj, page_index, page_end)
         return _render_docx_page(file_obj, page_index or 1)
     if normalized in {"ppt", "pptx"}:
         return _render_pptx_slide(file_obj, slide_index or 1)
+    if normalized == "md":
+        content = get_source_content(
+            file_id=file_id,
+            file_type=normalized,
+            line_start=line_start,
+            line_end=line_end,
+            section_name=section_name,
+        )
+        if section_name:
+            subtitle = f"Section {section_name}"
+            key = f"md_section_{section_name}"
+        else:
+            start = line_start or 1
+            end = line_end or start
+            subtitle = f"Lines {start}" if start == end else f"Lines {start}-{end}"
+            key = f"md_l{start}_{end}"
+        return _render_text_source_preview(file_obj, key, subtitle, content)
+    if normalized == "txt":
+        start = line_start or 1
+        end = line_end or start
+        content = get_source_content(
+            file_id=file_id,
+            file_type=normalized,
+            line_start=start,
+            line_end=end,
+        )
+        subtitle = f"Line {start}" if start == end else f"Lines {start}-{end}"
+        return _render_text_source_preview(file_obj, f"txt_l{start}_{end}", subtitle, content)
     if normalized in {"image", "png", "jpg", "jpeg", "webp", "svg"}:
-        return file_obj.file.url
+        return _render_direct_image(file_obj)
     raise PageRenderError(internal=f"Visual render unsupported. file_id={file_id} type={normalized}")
 
 def get_page_render(file_id: int, page_index: int, highlight_text: str = '') -> str:

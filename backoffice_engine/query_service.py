@@ -29,10 +29,24 @@ _LIST_PATTERN = re.compile(r"\b(list|name|all names|only list|only the names)\b"
 _SUMMARY_PATTERN = re.compile(r"\b(summary|summarize|summarise|overview|give me summary|what is this file|what is this document)\b", re.IGNORECASE)
 _NUMERIC_FILTER_PATTERN = re.compile(r"\b(greater than|less than|more than|below|above|between|at least|at most)\b", re.IGNORECASE)
 _SHORT_FOLLOWUP_PATTERN = re.compile(r"^\s*(list them|name them|show them|by which player|which player)\s*[?.!]*\s*$", re.IGNORECASE)
+_TOPIC_RECALL_PATTERN = re.compile(
+    r"^\s*(?:what(?:\s+are|'?re)?\s+we\s+talking\s+about|what\s+we\s+are\s+talking\s+about|what\s+is\s+the\s+(?:current\s+)?topic|which\s+topic\s+are\s+we\s+on)\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
+_DOCUMENT_REFERENCE_PATTERN = re.compile(
+    r"\b(?:in\s+here|here|inside\s+here|inside\s+the\s+file|inside\s+this\s+file|inside\s+the\s+document|inside\s+this\s+document)\b",
+    re.IGNORECASE,
+)
 _SHORT_CONTEXT_QUERY_PATTERN = re.compile(
     r"^\s*(?P<prefix>what is|what's|define|meaning of|explain|tell me about)\s+(?P<phrase>[A-Za-z][A-Za-z0-9\s/-]{0,40})\s*[?.!]*\s*$",
     re.IGNORECASE,
 )
+_CRICKET_CONCEPT_HINTS = {
+    "economy": "economy rate in cricket statistics explanation mentioned in the document",
+    "average": "batting average and bowling average in cricket statistics explanation mentioned in the document",
+    "strike rate": "strike rate in cricket statistics explanation mentioned in the document",
+    "boundary percentage": "boundary percentage in cricket statistics explanation mentioned in the document",
+}
 
 
 def is_greeting_query(query: str, chat_history: list | None = None) -> bool:
@@ -66,10 +80,21 @@ def expand_abbreviations(query: str) -> str:
     return re.sub(r"\s+", " ", expanded).strip()
 
 
-def resolve_vague_query(query: str, chat_history: list | None = None, active_topic: str = "", active_entities: list[str] | None = None) -> str:
+def resolve_vague_query(
+    query: str,
+    chat_history: list | None = None,
+    active_topic: str = "",
+    active_entities: list[str] | None = None,
+    prefer_document_context: bool = False,
+) -> str:
     text = re.sub(r"\s+", " ", (query or "").strip())
     if not text:
         return ""
+
+    if _TOPIC_RECALL_PATTERN.match(text):
+        topic = active_topic or _extract_history_topic(chat_history)
+        if topic:
+            return f"current topic in this conversation is {topic}"
 
     if _SHORT_FOLLOWUP_PATTERN.match(text) and active_topic:
         lowered = text.lower()
@@ -78,7 +103,15 @@ def resolve_vague_query(query: str, chat_history: list | None = None, active_top
         if "which player" in lowered:
             return f"Which player {active_topic}"
 
+    if prefer_document_context and _DOCUMENT_REFERENCE_PATTERN.search(text):
+        resolved_document_query = _DOCUMENT_REFERENCE_PATTERN.sub("in this document", text)
+        if active_topic and active_topic.lower() not in resolved_document_query.lower():
+            resolved_document_query = f"{resolved_document_query} about {active_topic}"
+        return re.sub(r"\s+", " ", resolved_document_query).strip()
+
     if _should_anchor_short_context_query(text) and active_topic and "file" not in text.lower() and "document" not in text.lower():
+        if prefer_document_context:
+            return f"{text} in this document about {active_topic}"
         return f"{text} in the context of {active_topic}"
 
     if not _REFERENCE_PATTERN.search(text):
@@ -123,7 +156,13 @@ def split_multi_question(query: str) -> list[str]:
     return [cleaned]
 
 
-def build_query_variations(query: str, chat_history: list | None = None, active_topic: str = "", active_entities: list[str] | None = None) -> list[str]:
+def build_query_variations(
+    query: str,
+    chat_history: list | None = None,
+    active_topic: str = "",
+    active_entities: list[str] | None = None,
+    prefer_document_context: bool = False,
+) -> list[str]:
     """
     Always return 2–3 compact retrieval queries.
     """
@@ -131,7 +170,13 @@ def build_query_variations(query: str, chat_history: list | None = None, active_
     if not original:
         return []
 
-    resolved = resolve_vague_query(original, chat_history=chat_history, active_topic=active_topic, active_entities=active_entities)
+    resolved = resolve_vague_query(
+        original,
+        chat_history=chat_history,
+        active_topic=active_topic,
+        active_entities=active_entities,
+        prefer_document_context=prefer_document_context,
+    )
     expanded = expand_abbreviations(resolved)
     concise = _expand_query_for_intent(expanded)
 
@@ -144,11 +189,23 @@ def build_query_variations(query: str, chat_history: list | None = None, active_
     return variations
 
 
-def get_resolved_query_text(query: str, chat_history: list | None = None, active_topic: str = "", active_entities: list[str] | None = None) -> str:
+def get_resolved_query_text(
+    query: str,
+    chat_history: list | None = None,
+    active_topic: str = "",
+    active_entities: list[str] | None = None,
+    prefer_document_context: bool = False,
+) -> str:
     original = re.sub(r"\s+", " ", (query or "").strip())
     if not original:
         return ""
-    resolved = resolve_vague_query(original, chat_history=chat_history, active_topic=active_topic, active_entities=active_entities)
+    resolved = resolve_vague_query(
+        original,
+        chat_history=chat_history,
+        active_topic=active_topic,
+        active_entities=active_entities,
+        prefer_document_context=prefer_document_context,
+    )
     expanded = expand_abbreviations(resolved)
     normalized = _normalize_special_cases(expanded or original)
     if _looks_like_entity_name(normalized):
@@ -223,6 +280,11 @@ def _expand_short_query(query: str) -> str:
 
 def _expand_query_for_intent(query: str) -> str:
     normalized = _normalize_special_cases(query)
+    lowered = normalized.lower()
+    if _is_definition_query(normalized):
+        for term, expanded in _CRICKET_CONCEPT_HINTS.items():
+            if term in lowered:
+                return expanded
     if _looks_like_entity_name(normalized):
         return f"who is {normalized} mentioned in the document"
     if is_summary_request(query):
@@ -232,6 +294,11 @@ def _expand_query_for_intent(query: str) -> str:
     if is_numeric_filter_request(query):
         return f"{normalized} exact numeric values only exact matching names mentioned in the document"
     return _expand_short_query(normalized)
+
+
+def _is_definition_query(query: str) -> bool:
+    lowered = (query or "").lower()
+    return any(phrase in lowered for phrase in ("what is", "what's", "define", "meaning of", "explain"))
 
 
 def _extract_history_topic(chat_history: list | None) -> str:

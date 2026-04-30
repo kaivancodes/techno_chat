@@ -63,6 +63,7 @@ VALID_CHAT_MODES     = (CHAT_MODE_RAG, CHAT_MODE_AI_ASSISTANT, CHAT_MODE_WEB_SEA
 SESSION_TYPE_FILE    = 'chat_with_file'
 SESSION_TYPE_GENERAL = 'general_chat'
 VALID_SESSION_TYPES  = (SESSION_TYPE_FILE, SESSION_TYPE_GENERAL)
+DOCUMENT_SCOPE_RESPONSE = "This question is outside the scope of the uploaded document."
 
 # Page viewer / image extraction
 PAGE_RENDER_SUPPORTED_TYPES   = ('pdf',)

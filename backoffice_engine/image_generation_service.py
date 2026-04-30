@@ -6,9 +6,10 @@ Text-to-image and image-to-image orchestration.
 
 from .helpers import filename_from_url
 from .clients import KieImageClient
-from .constants import CHAT_MODE_IMAGE_GENERATION
+from .constants import CHAT_MODE_IMAGE_GENERATION, DOCUMENT_SCOPE_RESPONSE
 from .exceptions import ChatResponseError
 from .image_processing_service import save_generated_image, save_uploaded_image, uploaded_image_to_data_uri
+from .retrieval_service import build_document_context_text
 from techno_chat.settings import logger
 
 
@@ -16,7 +17,15 @@ def _display_model_name(model_name: str, is_edit: bool) -> str:
     return "GPT 1 Image" if is_edit else "GPT 1.5 Image"
 
 
-def build_image_generation_prompt(query: str, request, uploaded_image=None, file_ids: list | None = None, conversation_state: dict | None = None, chat_history: list | None = None) -> dict:
+def build_image_generation_prompt(
+    query: str,
+    request,
+    uploaded_image=None,
+    file_ids: list | None = None,
+    conversation_state: dict | None = None,
+    chat_history: list | None = None,
+    strict_document_context: bool = False,
+) -> dict:
     if not query:
         raise ChatResponseError("Please enter a prompt before sending.")
 
@@ -26,6 +35,34 @@ def build_image_generation_prompt(query: str, request, uploaded_image=None, file
     image_urls = []
     sources = []
     prompt_query = query
+    strict_document_context = strict_document_context or bool(file_ids)
+
+    if strict_document_context:
+        document_context = build_document_context_text(
+            query=query,
+            file_ids=file_ids or [],
+            chat_history=chat_history or [],
+            conversation_state=conversation_state or {},
+            max_chunks=4,
+            token_budget=1000,
+        )
+        if not document_context:
+            return {
+                "answer": DOCUMENT_SCOPE_RESPONSE,
+                "sources": [],
+                "is_greeting": False,
+                "is_summary": False,
+                "chat_mode": CHAT_MODE_IMAGE_GENERATION,
+                "image_urls": [],
+                "selected_model": _display_model_name(client.edit_model if uploaded_image is not None else client.text_model, is_edit=uploaded_image is not None),
+                "resolved_query": query,
+            }
+        prompt_query = (
+            "Create the image using only this uploaded document context.\n"
+            f"Document context:\n{document_context}\n\n"
+            f"User request: {query}\n"
+            "Do not introduce details that are not supported by the document context."
+        )
 
     try:
         if uploaded_image is not None:

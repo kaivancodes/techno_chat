@@ -369,8 +369,50 @@ class KieImageClient:
             prepared_inputs.append(item)
         return prepared_inputs
 
+    def _extract_task_id(self, payload: dict | str | list | None) -> str:
+        def _looks_like_task_id(value):
+            if isinstance(value, int):
+                return True
+            if not isinstance(value, str):
+                return False
+            candidate = value.strip()
+            if not candidate:
+                return False
+            if candidate.isdigit():
+                return True
+            return len(candidate) >= 8 and candidate.lower() not in {
+                "success", "ok", "pending", "processing", "completed", "failed", "error"
+            }
+
+        def _pull_task_id(value):
+            if _looks_like_task_id(value):
+                return str(value).strip()
+            if isinstance(value, dict):
+                for key in ("task_id", "taskId", "id"):
+                    candidate = value.get(key)
+                    if _looks_like_task_id(candidate):
+                        return str(candidate).strip()
+                for nested_key in ("data", "result", "response", "output", "task", "record"):
+                    candidate = _pull_task_id(value.get(nested_key))
+                    if candidate:
+                        return candidate
+                for nested_key, nested_value in value.items():
+                    if nested_key in {"code", "msg", "message", "status"}:
+                        continue
+                    candidate = _pull_task_id(nested_value)
+                    if candidate:
+                        return candidate
+            if isinstance(value, list):
+                for item in value:
+                    candidate = _pull_task_id(item)
+                    if candidate:
+                        return candidate
+            return ""
+
+        return _pull_task_id(payload)
+
     @retry_on_network()
-    def _create_task(self, model: str, payload: dict) -> str:
+    def _create_task(self, model: str, payload: dict) -> str | list[str]:
         response = _requests.post(
             f"{self.base_url}/jobs/createTask",
             json={"model": model, "input": payload},
@@ -378,34 +420,22 @@ class KieImageClient:
             timeout=30,
         )
         response.raise_for_status()
-        payload = response.json()
-        data = payload.get("data") or {}
-        task_id = data.get("task_id") or data.get("taskId") or payload.get("task_id") or payload.get("taskId")
+        response_payload = response.json()
+        urls = self._extract_urls(response_payload)
+        if urls:
+            return urls
+        task_id = self._extract_task_id(response_payload)
         if not task_id:
+            logger.error(
+                "KIE createTask response missing task id and urls | model=%s | payload=%s",
+                model,
+                response_payload,
+            )
             raise ValueError("KIE task creation failed.")
         return task_id
 
     @retry_on_network()
-    def _create_gpt_image(self, prompt: str) -> list[str]:
-        response = _requests.post(
-            f"{self.base_url}/gpt/image",
-            json={"model": self.text_model, "prompt": prompt},
-            headers=self._headers(),
-            timeout=60,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        urls = self._extract_urls(payload)
-        if urls:
-            return urls
-        data = payload.get("data") or {}
-        image_base64 = data.get("b64_json") or data.get("base64")
-        if image_base64:
-            return [f"data:image/png;base64,{image_base64}"]
-        raise ValueError("KIE GPT image request returned no images.")
-
-    @retry_on_network()
-    def _create_4o_image_task(self, prompt: str, image_inputs: list[str] | None = None) -> str:
+    def _create_4o_image_task(self, prompt: str, image_inputs: list[str] | None = None) -> str | list[str]:
         payload = {
             "prompt": prompt,
             "size": "1:1",
@@ -424,8 +454,13 @@ class KieImageClient:
             timeout=60,
         )
         response.raise_for_status()
-        task_id = ((response.json().get("data") or {}).get("taskId"))
+        response_payload = response.json()
+        urls = self._extract_urls(response_payload)
+        if urls:
+            return urls
+        task_id = self._extract_task_id(response_payload)
         if not task_id:
+            logger.error("KIE 4o generate response missing task id and urls | payload=%s", response_payload)
             raise ValueError("KIE 4o image task creation failed.")
         return task_id
 
@@ -452,34 +487,29 @@ class KieImageClient:
         return response.json()
 
     def _extract_urls(self, payload: dict) -> list[str]:
-        data = payload.get("data") or {}
-        response = data.get("response") or {}
-        output = data.get("output") or {}
         urls = []
-        for container in (payload, data, response, output):
-            if isinstance(container, dict):
-                for key in ("resultUrl", "image_url", "imageUrl", "url"):
-                    value = container.get(key)
-                    if isinstance(value, str):
-                        urls.append(value)
-        for key in ("resultUrls", "result_urls"):
-            value = response.get(key)
-            if not isinstance(value, list):
-                continue
-            for item in value:
-                if isinstance(item, str):
-                    urls.append(item)
-        for key in ("image_urls", "images", "result_urls", "output_urls"):
-            value = output.get(key)
-            if not isinstance(value, list):
-                continue
-            for item in value:
-                if isinstance(item, str):
-                    urls.append(item)
-                elif isinstance(item, dict):
-                    url = item.get("url") or item.get("image_url")
-                    if url:
-                        urls.append(url)
+
+        def _collect(value):
+            if isinstance(value, str):
+                if value.startswith(("http://", "https://", "data:image/")):
+                    urls.append(value)
+                return
+            if isinstance(value, dict):
+                for key in (
+                    "resultUrl", "image_url", "imageUrl", "url", "downloadUrl",
+                    "sourceUrl", "ossUrl", "location"
+                ):
+                    candidate = value.get(key)
+                    if isinstance(candidate, str) and candidate.startswith(("http://", "https://", "data:image/")):
+                        urls.append(candidate)
+                for nested_value in value.values():
+                    _collect(nested_value)
+                return
+            if isinstance(value, list):
+                for item in value:
+                    _collect(item)
+
+        _collect(payload)
         return list(dict.fromkeys(urls))
 
     def _wait_for_output(self, task_id: str) -> list[str]:
@@ -508,15 +538,35 @@ class KieImageClient:
 
     def text_to_image(self, prompt: str) -> list[str]:
         if self._uses_4o_endpoint(self.text_model):
-            task_id = self._create_4o_image_task(prompt)
-            return self._wait_for_4o_output(task_id)
-        task_id = self._create_task(self.text_model, {"prompt": prompt})
-        return self._wait_for_output(task_id)
+            task_result = self._create_4o_image_task(prompt)
+            if isinstance(task_result, list):
+                return task_result
+            return self._wait_for_4o_output(task_result)
+        try:
+            task_result = self._create_task(
+                self.text_model,
+                {
+                    "prompt": prompt,
+                    "aspect_ratio": "1:1",
+                    "quality": "medium",
+                },
+            )
+            if isinstance(task_result, list):
+                return task_result
+            return self._wait_for_output(task_result)
+        except (ValueError, TimeoutError) as exc:
+            logger.warning("KIE text_to_image primary flow failed for model=%s | fallback=4o | err=%s", self.text_model, exc)
+            task_result = self._create_4o_image_task(prompt)
+            if isinstance(task_result, list):
+                return task_result
+            return self._wait_for_4o_output(task_result)
 
     def image_to_image(self, prompt: str, image_inputs: list[str]) -> list[str]:
         if self._uses_4o_endpoint(self.edit_model):
-            task_id = self._create_4o_image_task(prompt, image_inputs)
-            return self._wait_for_4o_output(task_id)
+            task_result = self._create_4o_image_task(prompt, image_inputs)
+            if isinstance(task_result, list):
+                return task_result
+            return self._wait_for_4o_output(task_result)
         normalized_inputs = self._prepare_image_inputs(image_inputs)
         payload = {"prompt": prompt}
         model_name = (self.edit_model or "").lower()
@@ -527,5 +577,7 @@ class KieImageClient:
             payload["image_urls"] = normalized_inputs
             payload["input_urls"] = normalized_inputs
 
-        task_id = self._create_task(self.edit_model, payload)
-        return self._wait_for_output(task_id)
+        task_result = self._create_task(self.edit_model, payload)
+        if isinstance(task_result, list):
+            return task_result
+        return self._wait_for_output(task_result)

@@ -21,6 +21,10 @@ _NAME_RECALL_PATTERN = re.compile(
     r"^\s*(?:what is my name|what's my name|tell me my name|who am i)\s*[?!.]*\s*$",
     re.IGNORECASE,
 )
+_TOPIC_RECALL_PATTERN = re.compile(
+    r"^\s*(?:what(?:\s+are|'?re)?\s+we\s+talking\s+about|what\s+we\s+are\s+talking\s+about|what\s+is\s+the\s+(?:current\s+)?topic|which\s+topic\s+are\s+we\s+on)\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
 
 _STOPWORDS = {
     "what", "which", "where", "when", "why", "how", "who", "is", "are", "the",
@@ -118,6 +122,24 @@ def answer_personal_memory_query(text: str, state: dict | None) -> str:
         return ""
     memory = (state or {}).get("personal_memory", {})
     return str(memory.get("name", "")).strip()
+
+
+def answer_conversation_focus_query(text: str, state: dict | None, has_document: bool = False) -> str:
+    if not _TOPIC_RECALL_PATTERN.match(text or ""):
+        return ""
+
+    current_state = state or {}
+    topic = str(current_state.get("active_topic", "")).strip()
+    entities = [str(item).strip() for item in current_state.get("active_entities", []) if str(item).strip()]
+    scope = "in the current document" if has_document else "in this conversation"
+
+    if topic and entities:
+        return f"We are talking about {topic} {scope}, especially {', '.join(entities[:3])}."
+    if topic:
+        return f"We are talking about {topic} {scope}."
+    if entities:
+        return f"We are talking about {', '.join(entities[:3])} {scope}."
+    return ""
 
 
 def _extract_topic(text: str) -> str:

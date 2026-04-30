@@ -22,6 +22,7 @@ from .helpers import (
     is_network_error, is_quota_error
 )
 from .conversation_state_service import (
+    answer_conversation_focus_query,
     answer_personal_memory_query,
     extract_personal_memory_update,
     get_conversation_state,
@@ -136,12 +137,14 @@ def _prepare_sources_for_display(sources, chat_mode: str):
             continue
         if chat_mode != CHAT_MODE_RAG:
             continue
+        normalized_file_type = (src.get("file_type") or "").lower()
         prepared.append(
             {
                 **src,
                 "display_ref": _format_chat_source_ref(src),
                 "display_file_name": src.get("file_name", ""),
                 "display_label": f"{src.get('file_name', '')} · {_format_chat_source_ref(src)}".strip(" ·"),
+                "is_previewable": normalized_file_type not in {"csv", "xlsx", "xls", "excel"},
                 "page_range_start": _ordered_range(src.get("page_index"), src.get("page_end"))[0],
                 "page_range_end": _ordered_range(src.get("page_index"), src.get("page_end"))[1],
                 "line_range_start": _ordered_range(src.get("line_start"), src.get("line_end"))[0],
@@ -161,6 +164,8 @@ def _detect_chat_intent(query: str, requested_chat_mode: str, uploaded_image, co
         return "personal_memory_store"
     if answer_personal_memory_query(query, conversation_state):
         return "personal_memory_recall"
+    if answer_conversation_focus_query(query, conversation_state):
+        return "conversation_focus_recall"
     if lowered in {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"}:
         return "greeting"
     if requested_chat_mode == CHAT_MODE_WEB_SEARCH:
@@ -403,6 +408,7 @@ def chat_send_view(request, session_id):
 
         # ── 2. Get file_ids linked to this session ───────────────────────────
         file_ids = list(session.files.values_list("id", flat=True))
+        strict_document_context = session.session_type == SESSION_TYPE_FILE
 
         # Only require files for RAG mode — AI Assistant and Web Search need none
         if uploaded_image and chat_mode != CHAT_MODE_IMAGE_GENERATION:
@@ -442,6 +448,18 @@ def chat_send_view(request, session_id):
             selected_model = model_name or list(settings.GEMINI_LLM_MODELS.keys())[0]
             update_conversation_state(request, session.id, query=query, resolved_query=query)
             set_last_active_chat_session(request, session.id)
+        elif detected_intent == "conversation_focus_recall":
+            focus_answer = answer_conversation_focus_query(query, conversation_state, has_document=bool(file_ids))
+            prompt = focus_answer or "We have not set a clear topic yet."
+            sources = []
+            is_greeting = False
+            is_summary = False
+            effective_chat_mode = chat_mode
+            image_urls = []
+            resolved_query = query
+            selected_model = model_name or list(settings.GEMINI_LLM_MODELS.keys())[0]
+            update_conversation_state(request, session.id, query=query, resolved_query=query)
+            set_last_active_chat_session(request, session.id)
         else:
 
             # ── 4. Route to the correct service ─────────────────────────────────
@@ -455,6 +473,7 @@ def chat_send_view(request, session_id):
                         file_ids=file_ids,
                         conversation_state=conversation_state,
                         chat_history=chat_history,
+                        strict_document_context=strict_document_context,
                     )
                 elif detected_intent == CHAT_MODE_AI_ASSISTANT:
                     result = build_ai_assistant_prompt(
@@ -463,6 +482,7 @@ def chat_send_view(request, session_id):
                         model_name=model_name,
                         conversation_state=conversation_state,
                         file_ids=file_ids,
+                        strict_document_context=strict_document_context,
                     )
                 elif detected_intent == CHAT_MODE_WEB_SEARCH:
                     result = build_web_search_prompt(
@@ -471,6 +491,7 @@ def chat_send_view(request, session_id):
                         chat_history=chat_history,
                         conversation_state=conversation_state,
                         file_ids=file_ids,
+                        strict_document_context=strict_document_context,
                     )
                 else:
                     result = build_chat_prompt(
@@ -666,6 +687,7 @@ def page_render_view(request):
     file_id        = request.GET.get("file_id")
     file_type      = request.GET.get("file_type", "").lower()
     page_index     = request.GET.get("page_index")
+    page_end       = request.GET.get("page_end")
     slide_index    = request.GET.get("slide_index")
     sheet_name     = request.GET.get("sheet_name")
     row_start      = request.GET.get("row_start")
@@ -679,14 +701,18 @@ def page_render_view(request):
 
     try:
         normalized_type = normalize_file_type(file_type)
-        is_visual_source = normalized_type in {"pdf", "doc", "docx", "ppt", "pptx", "image", "png", "jpg", "jpeg", "webp", "svg"}
+        is_visual_source = normalized_type in {"pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "image", "png", "jpg", "jpeg", "webp", "svg"}
 
         if is_visual_source:
             image_url = get_visual_render(
                 file_id=int(file_id),
                 file_type=normalized_type,
                 page_index=int(page_index) if page_index else None,
+                page_end=int(page_end) if page_end else None,
                 slide_index=int(slide_index) if slide_index else None,
+                line_start=int(line_start) if line_start else None,
+                line_end=int(line_end) if line_end else None,
+                section_name=section_name if section_name else None,
             )
             return JsonResponse({
                 "success":     True,

@@ -4,6 +4,8 @@ retrieval_service.py
 Hybrid vector similarity search + reranking.
 """
 
+import re
+
 from .clients import PineconeClient
 from .models import File
 from .query_service import build_query_variations, get_resolved_query_text
@@ -13,6 +15,12 @@ from techno_chat.settings import (
     RERANK_TOP_N,
 )
 from .constants import _LOCATION_FIELDS
+
+
+_DOCUMENT_METADATA_QUERY_PATTERN = re.compile(
+    r"\b(page count|pages|number of pages|total pages|sections|headings|outline|table of contents|chapters|word count|paragraph count|slide count|document statistics)\b",
+    re.IGNORECASE,
+)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -94,6 +102,17 @@ def _chunk_sort_key(chunk: dict) -> tuple:
     return (file_id, page_index, slide_index, sheet_name, row_start, line_start, section_name, chunk_index)
 
 
+def _is_document_metadata_chunk(chunk: dict) -> bool:
+    section_name = str(chunk.get("section_name", "") or "").strip().lower()
+    text = str(chunk.get("text", "") or "").strip().lower()
+    return section_name == "document statistics" or "document statistics" in text
+
+
+def _is_document_metadata_query(query_texts: list[str], original_query: str) -> bool:
+    combined = " ".join([original_query or ""] + [item or "" for item in query_texts])
+    return bool(_DOCUMENT_METADATA_QUERY_PATTERN.search(combined))
+
+
 def filter_retrieved_chunks(
     original_query: str,
     query_texts: list[str],
@@ -108,11 +127,14 @@ def filter_retrieved_chunks(
     seen = set()
     location_counts = {}
     used_tokens = 0
+    allow_document_metadata = _is_document_metadata_query(query_texts, original_query)
 
     for allow_repeat_locations in (False, True):
         for chunk in ranked:
             identity = _chunk_identity(chunk)
             if identity in seen:
+                continue
+            if not allow_document_metadata and _is_document_metadata_chunk(chunk):
                 continue
 
             location_key = _chunk_location_key(chunk)
@@ -237,12 +259,14 @@ def build_document_context_text(
         chat_history=chat_history or [],
         active_topic=state.get("active_topic", ""),
         active_entities=state.get("active_entities", []),
+        prefer_document_context=bool(file_ids),
     )
     query_variations = build_query_variations(
         query,
         chat_history=chat_history or [],
         active_topic=state.get("active_topic", ""),
         active_entities=state.get("active_entities", []),
+        prefer_document_context=bool(file_ids),
     )
     if not query_variations:
         query_variations = [resolved_query or query]

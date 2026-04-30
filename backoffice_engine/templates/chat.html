@@ -170,6 +170,7 @@
               {% else %}
               {# RAG: clickable button — works on refresh too because all data is in the DB #}
               <span class="msg-source">
+                {% if src.is_previewable %}
                 <button type="button"
                         class="rag-source-btn"
                         data-file-id="{{ src.file_id }}"
@@ -185,6 +186,9 @@
                         data-fname="{{ src.display_file_name }}"
                         data-highlight="{{ src.highlight_text }}"
                         onclick="openSourceViewer(this)">{{ src.display_file_name }}</button>
+                {% else %}
+                <span class="rag-source-static">{{ src.display_file_name }}</span>
+                {% endif %}
                 {% if src.display_ref %}&middot; {{ src.display_ref }}{% endif %}
               </span>
               {% endif %}

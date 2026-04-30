@@ -20,10 +20,11 @@ from PIL import Image
 from pptx import Presentation
 from pptx.util import Inches as PptxInches
 
-from backoffice_engine import admin_views, ai_assistant_service, chat_service, clients, document_reader, image_generation_service, web_search_service
+from backoffice_engine import admin_views, ai_assistant_service, chat_service, clients, document_reader, image_generation_service, query_service, retrieval_service, structured_file_service, views, web_search_service
 from backoffice_engine.admin_auth import create_admin
 from backoffice_engine.choices import FileProcessingStatus, FileType, SessionType
 from backoffice_engine.conversation_state_service import get_last_active_chat_session_id
+from backoffice_engine.constants import DOCUMENT_SCOPE_RESPONSE
 from backoffice_engine.document_reader import extract_file_text
 from backoffice_engine.exceptions import ChatResponseError, NoTextExtractedError, WebSearchError
 from backoffice_engine.ingestion_service import embed_file_and_upsert
@@ -634,13 +635,293 @@ class RagChatTests(BaseTechnoChatTestCase):
             )
         self.assertIn("cricket statistics", follow_up["resolved_query"])
 
+    def test_tc_rag_follow_up_here_queries_stay_anchored_to_document_context(self):
+        llm = FakeLLM(['{"answer": "India, Sri Lanka, Australia and England are mentioned.", "used_context_ids": [1]}'])
+        with patch("backoffice_engine.chat_service.ChatPromptTemplate.from_messages", return_value=FakePromptPipe()), patch(
+            "backoffice_engine.chat_service._select_llm",
+            return_value=llm,
+        ), patch(
+            "backoffice_engine.chat_service.retrieve_query_variations",
+            return_value=self.sample_chunks(),
+        ), patch("backoffice_engine.chat_service.try_build_structured_answer", return_value=None):
+            follow_up = chat_service.build_chat_prompt(
+                "Countries mentioned here.",
+                [1],
+                [SimpleNamespace(question="Give me the summary of the file.", answer="...")],
+                "Gemini 2.5 Pro",
+                conversation_state={"active_topic": "cricket statistics and player performance", "active_entities": ["MS Dhoni", "Virat Kohli"]},
+            )
+        self.assertIn("this document", follow_up["resolved_query"].lower())
+        self.assertIn("cricket statistics", follow_up["resolved_query"].lower())
+
+    def test_tc_rag_summary_ignores_document_statistics_chunks(self):
+        chunks = [
+            {
+                "file_id": 1,
+                "file_name": "report.docx",
+                "file_type": "docx",
+                "normalized_file_type": "docx",
+                "page_index": 1,
+                "section_name": "Document Statistics",
+                "score": 0.97,
+                "chunk_index": 0,
+                "text": "Word Document Statistics Total pages: 23 Sections: 19 First page word count: 25",
+            },
+            {
+                "file_id": 1,
+                "file_name": "report.docx",
+                "file_type": "docx",
+                "normalized_file_type": "docx",
+                "page_index": 2,
+                "section_name": "India",
+                "score": 0.90,
+                "chunk_index": 1,
+                "text": "India section covering Sachin Tendulkar, MS Dhoni and Virat Kohli.",
+            },
+            {
+                "file_id": 1,
+                "file_name": "report.docx",
+                "file_type": "docx",
+                "normalized_file_type": "docx",
+                "page_index": 7,
+                "section_name": "New Zealand",
+                "score": 0.88,
+                "chunk_index": 2,
+                "text": "New Zealand section covering key ODI players and statistics.",
+            },
+        ]
+        filtered = retrieval_service.filter_retrieved_chunks(
+            original_query="Summarise this file",
+            query_texts=["Summarise this file", "summary mentioned in the document"],
+            results=chunks,
+            max_chunks=10,
+            token_budget=5000,
+            max_per_location=3,
+            preserve_source_order=True,
+        )
+        self.assertEqual(len(filtered), 2)
+        self.assertTrue(all((item.get("section_name") or "") != "Document Statistics" for item in filtered))
+
+    def test_tc_rag_cricket_definition_query_expands_to_explanation_search(self):
+        variations = query_service.build_query_variations(
+            "What is economy?",
+            active_topic="cricket statistics and player performance",
+            prefer_document_context=True,
+        )
+        self.assertTrue(any("economy rate in cricket statistics explanation" in item.lower() for item in variations))
+
+    def test_tc_rag_pdf_source_merging_keeps_non_consecutive_pages_separate(self):
+        merged = chat_service._merge_adjacent_sources([
+            {"file_id": 1, "file_name": "ODI_Cricket_Players.pdf", "file_type": "pdf", "page_index": 4},
+            {"file_id": 1, "file_name": "ODI_Cricket_Players.pdf", "file_type": "pdf", "page_index": 10},
+        ])
+
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0]["page_index"], 4)
+        self.assertEqual(merged[1]["page_index"], 10)
+
+    def test_tc_rag_pdf_source_merging_allows_true_adjacent_page_ranges(self):
+        merged = chat_service._merge_adjacent_sources([
+            {"file_id": 1, "file_name": "ODI_Cricket_Players.pdf", "file_type": "pdf", "page_index": 9},
+            {"file_id": 1, "file_name": "ODI_Cricket_Players.pdf", "file_type": "pdf", "page_index": 10},
+        ])
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["page_index"], 9)
+        self.assertEqual(merged[0]["page_end"], 10)
+
+    def test_tc_rag_pdf_structured_multi_player_stats_builds_separate_sources(self):
+        structured_doc = {
+            "file_id": 1,
+            "file_name": "ODI_Cricket_Players.pdf",
+            "file_type": "pdf",
+            "players": [
+                {
+                    "name": "Bhuvneshwar Kumar",
+                    "country": "India",
+                    "description": "Bhuvneshwar Kumar scored 552 runs at an average of 14.52 and strike rate of 67.0. He took 141 wickets at an average of 35.11, economy 5.08 and strike rate 41.4. He completed 34 catches and 9 runouts.",
+                    "stats": {"runs": 552, "batting_average": 14.52, "strike_rate": 67.0, "wickets": 141, "bowling_average": 35.11, "economy_rate": 5.08, "bowling_strike_rate": 41.4, "catches": 34, "runouts": 9},
+                    "page_index": 4,
+                    "page_end": 4,
+                    "line_start": 1,
+                    "line_end": 10,
+                },
+                {
+                    "name": "Trent Boult",
+                    "country": "New Zealand",
+                    "description": "Trent Boult scored 234 runs at an average of 11.70 and strike rate of 65.0. He took 211 wickets at an average of 24.65, economy 4.93 and strike rate 30.0.",
+                    "stats": {"runs": 234, "batting_average": 11.70, "strike_rate": 65.0, "wickets": 211, "bowling_average": 24.65, "economy_rate": 4.93, "bowling_strike_rate": 30.0},
+                    "page_index": 10,
+                    "page_end": 10,
+                    "line_start": 1,
+                    "line_end": 8,
+                },
+            ],
+            "glossary": {},
+        }
+
+        answer = structured_file_service._answer_from_structured_doc(
+            "Give me stats about Bhuvneshwar Kumar and Trent Boult.",
+            structured_doc,
+        )
+
+        self.assertIsNotNone(answer)
+        self.assertEqual(len(answer["sources"]), 2)
+        self.assertEqual(answer["sources"][0]["page_index"], 4)
+        self.assertEqual(answer["sources"][1]["page_index"], 10)
+
+    def test_tc_rag_pdf_structured_single_player_can_span_adjacent_pages(self):
+        structured_doc = {
+            "file_id": 1,
+            "file_name": "ODI_Cricket_Players.pdf",
+            "file_type": "pdf",
+            "players": [
+                {
+                    "name": "Kane Williamson",
+                    "country": "New Zealand",
+                    "description": "Kane Williamson scored 6810 runs at an average of 47.00 and strike rate of 81.00. He took 37 wickets at an average of 45.00, economy 4.80 and strike rate 56.0.",
+                    "stats": {"runs": 6810, "batting_average": 47.00, "strike_rate": 81.00, "wickets": 37, "bowling_average": 45.00, "economy_rate": 4.80, "bowling_strike_rate": 56.0},
+                    "page_index": 9,
+                    "page_end": 10,
+                    "line_start": 1,
+                    "line_end": 12,
+                },
+            ],
+            "glossary": {},
+        }
+
+        answer = structured_file_service._answer_from_structured_doc("Who is Kane Williamson????", structured_doc)
+
+        self.assertIsNotNone(answer)
+        self.assertEqual(answer["sources"][0]["page_index"], 9)
+        self.assertEqual(answer["sources"][0]["page_end"], 10)
+
+    def test_tc_rag_pdf_batting_stats_query_returns_readable_two_player_answer(self):
+        structured_doc = {
+            "file_id": 1,
+            "file_name": "ODI_Cricket_Players.pdf",
+            "file_type": "pdf",
+            "players": [
+                {
+                    "name": "Shaun Pollock",
+                    "country": "South Africa",
+                    "description": "303 ODIs 3,519 26.45 86.06 1 14 130 280 44 11.0%",
+                    "stats": structured_file_service._extract_player_stats("303 ODIs 3,519 26.45 86.06 1 14 130 280 44 11.0%", "Shaun Pollock"),
+                    "page_index": 5,
+                    "page_end": 5,
+                    "line_start": 1,
+                    "line_end": 4,
+                },
+                {
+                    "name": "Adam Gilchrist",
+                    "country": "Australia",
+                    "description": "287 ODIs 9,619 35.89 96.94 16 55 172 1162 149 13.6%",
+                    "stats": structured_file_service._extract_player_stats("287 ODIs 9,619 35.89 96.94 16 55 172 1162 149 13.6%", "Adam Gilchrist"),
+                    "page_index": 6,
+                    "page_end": 6,
+                    "line_start": 1,
+                    "line_end": 4,
+                },
+            ],
+            "glossary": {},
+        }
+
+        answer = structured_file_service._answer_from_structured_doc(
+            "Give me batting stats of Shaun Pollock and Adam Gilchrist.",
+            structured_doc,
+        )
+
+        self.assertIsNotNone(answer)
+        self.assertIn("Shaun Pollock batting stats:", answer["answer"])
+        self.assertIn("Adam Gilchrist batting stats:", answer["answer"])
+        self.assertIn("Runs: 3,519", answer["answer"])
+        self.assertIn("Runs: 9,619", answer["answer"])
+        self.assertEqual(len(answer["sources"]), 1)
+        self.assertEqual(answer["sources"][0]["page_index"], 5)
+        self.assertEqual(answer["sources"][0]["page_end"], 6)
+
+    def test_tc_rag_pdf_bowling_stats_query_uses_bowling_entry_not_batting_entry(self):
+        structured_doc = {
+            "file_id": 1,
+            "file_name": "ODI_Cricket_Players.pdf",
+            "file_type": "pdf",
+            "players": [
+                {
+                    "name": "Muttiah Muralitharan",
+                    "country": "Sri Lanka",
+                    "description": "350 ODIs 674 6.83 72.0 0 0 33* 50 10 7.0%",
+                    "stats": structured_file_service._extract_player_stats("350 ODIs 674 6.83 72.0 0 0 33* 50 10 7.0%", "Muttiah Muralitharan"),
+                    "page_index": 15,
+                    "page_end": 15,
+                    "line_start": 1,
+                    "line_end": 4,
+                },
+                {
+                    "name": "Muttiah Muralitharan",
+                    "country": "Sri Lanka",
+                    "description": "350 ODIs 534 23.08 3.93 35.2 15 10",
+                    "stats": structured_file_service._extract_player_stats("350 ODIs 534 23.08 3.93 35.2 15 10", "Muttiah Muralitharan"),
+                    "page_index": 16,
+                    "page_end": 16,
+                    "line_start": 1,
+                    "line_end": 4,
+                },
+            ],
+            "glossary": {},
+        }
+
+        answer = structured_file_service._answer_from_structured_doc(
+            "Give me bowling stats of Muttiah Muralitharan.",
+            structured_doc,
+        )
+
+        self.assertIsNotNone(answer)
+        self.assertIn("Muttiah Muralitharan bowling stats:", answer["answer"])
+        self.assertIn("Wickets: 534", answer["answer"])
+        self.assertIn("Economy Rate: 3.93", answer["answer"])
+        self.assertEqual(answer["sources"][0]["page_index"], 16)
+
+    def test_tc_rag_pdf_average_definition_uses_file_context_with_explanation(self):
+        structured_doc = {
+            "file_id": 1,
+            "file_name": "ODI_Cricket_Players.pdf",
+            "file_type": "pdf",
+            "players": [],
+            "glossary": {
+                "batting average": {
+                    "title": "Batting Average",
+                    "definition": "Batting average is runs divided by dismissals.",
+                    "line_start": 1,
+                    "line_end": 2,
+                    "page_index": 2,
+                    "page_end": 2,
+                },
+                "bowling average": {
+                    "title": "Bowling Average",
+                    "definition": "Bowling average is runs conceded per wicket.",
+                    "line_start": 3,
+                    "line_end": 4,
+                    "page_index": 2,
+                    "page_end": 2,
+                },
+            },
+        }
+
+        answer = structured_file_service._answer_from_structured_doc("What is average????", structured_doc)
+
+        self.assertIsNotNone(answer)
+        self.assertIn("According to the file", answer["answer"])
+        self.assertIn("batting average", answer["answer"].lower())
+        self.assertIn("bowling average", answer["answer"].lower())
+        self.assertEqual(answer["sources"][0]["page_index"], 2)
+
     def test_tc_rag_14_returns_empty_response_when_no_context_found(self):
         with patch("backoffice_engine.chat_service.retrieve_query_variations", return_value=[]), patch(
             "backoffice_engine.chat_service.try_build_structured_answer",
             return_value=None,
         ), patch("backoffice_engine.chat_service._select_llm"):
             result = chat_service.build_chat_prompt("Question with no match", [1], [], "Gemini 2.5 Pro")
-        self.assertEqual(result["answer"], chat_service.EMPTY_RAG_RESPONSE)
+        self.assertEqual(result["answer"], DOCUMENT_SCOPE_RESPONSE)
         self.assertEqual(result["sources"], [])
 
     def test_tc_rag_abusive_non_question_returns_respectful_response(self):
@@ -684,8 +965,59 @@ class RagChatTests(BaseTechnoChatTestCase):
 
         txt_response = self.client.get(reverse("page_render"), {"file_id": txt.id, "file_type": "txt", "line_start": 1, "line_end": 2})
         self.assertTrue(txt_response.json()["success"])
-        self.assertEqual(txt_response.json()["source_type"], "text")
-        self.assertIn("Line A", txt_response.json()["content_text"])
+        self.assertEqual(txt_response.json()["source_type"], "page")
+        self.assertIn("/media/page_renders/", txt_response.json()["image_url"])
+
+    def test_tc_rag_source_viewer_supports_md_image_and_page_ranges(self):
+        user, _ = self.create_contributor(email="viewer2@technostacks.com", username="viewer.two")
+        self.set_contributor_session(user)
+
+        pdf = File.objects.create(
+            user=user,
+            file=SimpleUploadedFile("report.pdf", self.pdf_file(pages=["Page one", "Page two"]).read_bytes(), content_type="application/pdf"),
+            file_type=FileType.PDF,
+            original_filename="report.pdf",
+            embedding_status=FileProcessingStatus.COMPLETED,
+        )
+        md = File.objects.create(
+            user=user,
+            file=SimpleUploadedFile("notes.md", b"# Players\nVirat Kohli\nMS Dhoni\n", content_type="text/markdown"),
+            file_type=FileType.MD,
+            original_filename="notes.md",
+            embedding_status=FileProcessingStatus.COMPLETED,
+        )
+        image = File.objects.create(
+            user=user,
+            file=SimpleUploadedFile("photo.png", self.image_file().read_bytes(), content_type="image/png"),
+            file_type=FileType.IMAGE,
+            original_filename="photo.png",
+            embedding_status=FileProcessingStatus.COMPLETED,
+        )
+
+        pdf_range_response = self.client.get(reverse("page_render"), {"file_id": pdf.id, "file_type": "pdf", "page_index": 1, "page_end": 2})
+        self.assertTrue(pdf_range_response.json()["success"])
+        self.assertEqual(pdf_range_response.json()["source_type"], "page")
+        self.assertIn("/media/page_renders/", pdf_range_response.json()["image_url"])
+
+        md_response = self.client.get(reverse("page_render"), {"file_id": md.id, "file_type": "md", "section_name": "Players"})
+        self.assertTrue(md_response.json()["success"])
+        self.assertEqual(md_response.json()["source_type"], "page")
+        self.assertIn("/media/page_renders/", md_response.json()["image_url"])
+
+        image_response = self.client.get(reverse("page_render"), {"file_id": image.id, "file_type": "png"})
+        self.assertTrue(image_response.json()["success"])
+        self.assertEqual(image_response.json()["source_type"], "page")
+        self.assertIn("/media/page_renders/", image_response.json()["image_url"])
+
+    def test_tc_rag_prepare_sources_marks_csv_as_non_previewable(self):
+        prepared = views._prepare_sources_for_display([
+            {"file_name": "scores.csv", "file_type": "csv", "file_id": 1, "row_start": 2, "row_end": 4},
+            {"file_name": "notes.txt", "file_type": "txt", "file_id": 2, "line_start": 1, "line_end": 3},
+        ], "rag")
+
+        self.assertEqual(len(prepared), 2)
+        self.assertFalse(prepared[0]["is_previewable"])
+        self.assertTrue(prepared[1]["is_previewable"])
 
 
 class AIAssistantTests(BaseTechnoChatTestCase):
@@ -741,6 +1073,22 @@ class AIAssistantTests(BaseTechnoChatTestCase):
         self.assertIn("Part two answer.", multi["answer"])
         self.assertTrue(llm.calls[0]["chat_history"])
 
+    def test_tc_ai_file_mode_returns_scope_fallback_without_document_context(self):
+        with patch("backoffice_engine.ai_assistant_service.build_document_context_text", return_value=""), patch(
+            "backoffice_engine.ai_assistant_service._select_llm"
+        ) as llm_mock:
+            result = ai_assistant_service.build_ai_assistant_prompt(
+                "What is a cycle?",
+                [],
+                "Gemini 2.5 Pro",
+                conversation_state={"active_topic": "heart biology"},
+                file_ids=[1],
+                strict_document_context=True,
+            )
+        self.assertEqual(result["answer"], DOCUMENT_SCOPE_RESPONSE)
+        self.assertEqual(result["sources"], [])
+        llm_mock.assert_not_called()
+
 
 class WebSearchTests(BaseTechnoChatTestCase):
     def test_tc_web_01_to_03_news_and_live_data_queries_return_sources(self):
@@ -793,6 +1141,22 @@ class WebSearchTests(BaseTechnoChatTestCase):
         result = web_search_service.build_web_search_prompt("idiot", "Gemini 2.5 Pro", [])
         self.assertEqual(result["answer"], web_search_service.RESPECTFUL_RESPONSE)
         self.assertEqual(result["sources"], [])
+
+    def test_tc_web_file_mode_returns_scope_fallback_without_document_context(self):
+        with patch("backoffice_engine.web_search_service.build_document_context_text", return_value=""), patch(
+            "backoffice_engine.web_search_service.SerperClient.search"
+        ) as search_mock:
+            result = web_search_service.build_web_search_prompt(
+                "How pump works?",
+                "Gemini 2.5 Pro",
+                [],
+                conversation_state={"active_topic": "heart biology"},
+                file_ids=[1],
+                strict_document_context=True,
+            )
+        self.assertEqual(result["answer"], DOCUMENT_SCOPE_RESPONSE)
+        self.assertEqual(result["sources"], [])
+        search_mock.assert_not_called()
 
 
 class ImageGenerationTests(BaseTechnoChatTestCase):
@@ -877,6 +1241,48 @@ class ImageGenerationTests(BaseTechnoChatTestCase):
                 image_generation_service.build_image_generation_prompt("Create art", request)
         self.assertIn("not configured properly", exc.exception.user_message)
 
+    def test_tc_img_file_mode_returns_scope_fallback_without_document_context(self):
+        request = MagicMock()
+        client = MagicMock()
+        client.api_key = "key"
+        client.text_model = "gpt-image/1.5-text-to-image"
+        client.edit_model = "4o-image-api"
+        with patch("backoffice_engine.image_generation_service.KieImageClient", return_value=client), patch(
+            "backoffice_engine.image_generation_service.build_document_context_text",
+            return_value="",
+        ):
+            result = image_generation_service.build_image_generation_prompt(
+                "Give me image of summary of pdf",
+                request,
+                file_ids=[1],
+                strict_document_context=True,
+            )
+        self.assertEqual(result["answer"], DOCUMENT_SCOPE_RESPONSE)
+        self.assertEqual(result["image_urls"], [])
+
+    def test_tc_img_file_mode_builds_prompt_from_document_context(self):
+        request = MagicMock()
+        client = MagicMock()
+        client.api_key = "key"
+        client.text_model = "gpt-image/1.5-text-to-image"
+        client.edit_model = "4o-image-api"
+        client.text_to_image.return_value = ["https://img.example/generated.png"]
+        with patch("backoffice_engine.image_generation_service.KieImageClient", return_value=client), patch(
+            "backoffice_engine.image_generation_service.build_document_context_text",
+            return_value="Heart pumps blood through the body.",
+        ), patch(
+            "backoffice_engine.image_generation_service.save_generated_image",
+            return_value=("/media/page_renders/generated.png", "/tmp/generated.png"),
+        ):
+            result = image_generation_service.build_image_generation_prompt(
+                "Give me image of summary of pdf",
+                request,
+                file_ids=[1],
+                strict_document_context=True,
+            )
+        self.assertEqual(result["image_urls"][0], "/media/page_renders/generated.png")
+        self.assertIn("Heart pumps blood through the body.", client.text_to_image.call_args.args[0])
+
     def test_tc_img_text_model_uses_standard_task_endpoint_for_gpt_15(self):
         client = clients.KieImageClient(api_key="key")
         client.text_model = "gpt-image/1.5-text-to-image"
@@ -887,9 +1293,49 @@ class ImageGenerationTests(BaseTechnoChatTestCase):
             result = client.text_to_image("Create a poster")
 
         self.assertEqual(result, ["https://img.example/generated.png"])
-        create_task_mock.assert_called_once_with("gpt-image/1.5-text-to-image", {"prompt": "Create a poster"})
+        create_task_mock.assert_called_once_with(
+            "gpt-image/1.5-text-to-image",
+            {"prompt": "Create a poster", "aspect_ratio": "1:1", "quality": "medium"},
+        )
         wait_mock.assert_called_once_with("task-123")
         create_4o_mock.assert_not_called()
+
+    def test_tc_img_text_model_falls_back_to_4o_when_primary_task_flow_fails(self):
+        client = clients.KieImageClient(api_key="key")
+        client.text_model = "gpt-image/1.5-text-to-image"
+
+        with patch.object(client, "_create_task", side_effect=ValueError("no task id")) as create_task_mock, patch.object(
+            client, "_create_4o_image_task", return_value="task-4o"
+        ) as create_4o_mock, patch.object(
+            client, "_wait_for_4o_output", return_value=["https://img.example/generated.png"]
+        ) as wait_4o_mock:
+            result = client.text_to_image("Create a poster")
+
+        self.assertEqual(result, ["https://img.example/generated.png"])
+        create_task_mock.assert_called_once()
+        create_4o_mock.assert_called_once_with("Create a poster")
+        wait_4o_mock.assert_called_once_with("task-4o")
+
+    def test_tc_img_extract_task_id_accepts_nested_scalar_task_ids(self):
+        client = clients.KieImageClient(api_key="key")
+
+        self.assertEqual(client._extract_task_id({"data": "task-12345"}), "task-12345")
+        self.assertEqual(client._extract_task_id({"result": {"task": 987654321}}), "987654321")
+
+    def test_tc_img_text_to_image_accepts_direct_urls_from_4o_generate(self):
+        client = clients.KieImageClient(api_key="key")
+        client.text_model = "4o-image-api"
+
+        with patch.object(
+            client,
+            "_create_4o_image_task",
+            return_value=["https://img.example/generated-direct.png"],
+        ) as create_4o_mock, patch.object(client, "_wait_for_4o_output") as wait_mock:
+            result = client.text_to_image("Create a poster")
+
+        self.assertEqual(result, ["https://img.example/generated-direct.png"])
+        create_4o_mock.assert_called_once_with("Create a poster")
+        wait_mock.assert_not_called()
 
 
 class AdminSourceFormattingTests(SimpleTestCase):
@@ -974,6 +1420,34 @@ class SessionAndChatManagementTests(BaseTechnoChatTestCase):
         saved = ChatMessage.objects.get(session=session)
         self.assertEqual(saved.sources, [])
         self.assertEqual(get_last_active_chat_session_id(self.client), session.id)
+
+    def test_chat_send_returns_stored_conversation_focus_for_topic_recall(self):
+        user, _ = self.create_contributor(email="focus@technostacks.com", username="focus.user")
+        self.set_contributor_session(user)
+        session = ChatSession.objects.create(user=user, title="Focus Talk", session_type=SessionType.GENERAL_CHAT)
+
+        session_state = self.client.session
+        session_state["conversation_state"] = {
+            str(session.id): {
+                "active_topic": "cricket statistics and player performance",
+                "active_entities": ["MS Dhoni", "Virat Kohli"],
+                "recent_queries": ["Tell me about MS Dhoni", "Give stats of Virat Kohli"],
+                "recent_entities": ["MS Dhoni", "Virat Kohli"],
+                "personal_memory": {},
+            }
+        }
+        session_state.save()
+
+        response = self.client.post(
+            reverse("chat_send", args=[session.id]),
+            data=json.dumps({"query": "What we are talking about????", "model_name": "Llama 3.3 70B", "chat_mode": "ai_assistant"}),
+            content_type="application/json",
+        )
+
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertIn("cricket statistics and player performance", payload["message"]["answer"].lower())
+        self.assertEqual(payload["message"]["sources"], [])
 
     def test_chat_send_requires_post_method(self):
         user, _ = self.create_contributor(email="method@technostacks.com", username="method.user")

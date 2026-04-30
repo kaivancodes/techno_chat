@@ -19,7 +19,6 @@ import re
 import fitz                          # PyMuPDF  (PDF stats)
 import pandas as pd                  # CSV / Excel stats
 from docx import Document as DocxDoc # DOCX stats
-from pptx import Presentation        # PPTX stats
 
 from .document_reader import extract_file_text
 from .models import File
@@ -104,6 +103,30 @@ _STAT_LABELS = {
     "runouts": "Runouts",
 }
 
+_BATTING_FIELDS = (
+    "runs",
+    "batting_average",
+    "strike_rate",
+    "centuries",
+    "fifties",
+    "highest_score",
+    "fours",
+    "sixes",
+)
+_BOWLING_FIELDS = (
+    "wickets",
+    "bowling_average",
+    "economy_rate",
+    "bowling_strike_rate",
+    "four_wicket_hauls",
+    "five_wicket_hauls",
+)
+_FIELDING_FIELDS = (
+    "catches",
+    "stumpings",
+    "runouts",
+)
+
 
 def try_build_structured_answer(query: str, file_ids: list[int]) -> dict | None:
     normalized_query = re.sub(r"\s+", " ", (query or "").strip())
@@ -121,7 +144,7 @@ def try_build_structured_answer(query: str, file_ids: list[int]) -> dict | None:
                 answer = _answer_from_structured_doc(normalized_query, structured_doc)
                 if answer:
                     return answer
-        elif file_type in {"power", "ppt", "pptx"}:
+        elif file_type in {"power", "ppt", "pptx", "pdf"}:
             structured_doc = _parse_segmented_structured_file(file_obj)
             if structured_doc:
                 answer = _answer_from_structured_doc(normalized_query, structured_doc)
@@ -136,11 +159,6 @@ def try_build_structured_answer(query: str, file_ids: list[int]) -> dict | None:
 
         elif file_type in {"excel", "xlsx", "xls"}:
             answer = _answer_excel_query(normalized_query, file_obj)
-            if answer:
-                return answer
-
-        elif file_type in {"power", "pptx", "ppt"}:
-            answer = _answer_pptx_query(normalized_query, file_obj)
             if answer:
                 return answer
 
@@ -364,7 +382,7 @@ def _parse_segmented_structured_file(file_obj: File) -> dict | None:
                 continue
 
             if not current_country and not current_player_name:
-                glossary_entry = _extract_glossary_entry(cleaned_lines, index)
+                glossary_entry = _extract_glossary_entry(cleaned_lines, index, location)
                 if glossary_entry:
                     glossary[glossary_entry["term"]] = glossary_entry
                     index = glossary_entry["next_index"]
@@ -388,11 +406,15 @@ def _parse_segmented_structured_file(file_obj: File) -> dict | None:
                 current_player_section = current_section
                 current_player_country = current_country
                 current_player_location = dict(location)
+                if location.get("page_index") is not None:
+                    current_player_location["page_end"] = location.get("page_index")
                 index += 1
                 continue
 
             if current_player_name:
                 current_player_lines.append((item["line_number"], line_text))
+                if location.get("page_index") is not None:
+                    current_player_location["page_end"] = location.get("page_index")
             index += 1
 
     _flush_player(
@@ -424,23 +446,25 @@ def _answer_from_structured_doc(query: str, structured_doc: dict) -> dict | None
     player_match = _match_player_query(query, structured_doc["players"])
     matched_players = _extract_query_players(query, structured_doc["players"])
     country_name = _match_country_in_query(query)
+    requested_fields = _detect_requested_fields(query)
 
     if player_match:
-        if _is_stats_only_query(lowered_query):
-            return _build_player_stats_only_answer(structured_doc, player_match)
-
-        requested_fields = _detect_requested_fields(query)
+        player_profile = _resolve_player_profile(player_match, structured_doc["players"], requested_fields, lowered_query)
         if len(matched_players) > 1 and requested_fields:
-            return _build_multi_player_field_answer(structured_doc, matched_players, requested_fields)
+            player_profiles = _resolve_player_profiles(matched_players, structured_doc["players"], requested_fields, lowered_query)
+            return _build_multi_player_field_answer(structured_doc, player_profiles, requested_fields)
         if requested_fields:
-            return _build_single_player_field_answer(structured_doc, player_match, requested_fields)
+            return _build_single_player_field_answer(structured_doc, player_profile, requested_fields, lowered_query)
+        if len(matched_players) > 1 and _is_stats_only_query(lowered_query):
+            player_profiles = _resolve_player_profiles(matched_players, structured_doc["players"], requested_fields, lowered_query)
+            return _build_multi_player_stats_answer(structured_doc, player_profiles)
+        if _is_stats_only_query(lowered_query):
+            return _build_player_stats_only_answer(structured_doc, player_profile)
 
-    glossary_match = _match_glossary_query(lowered_query, structured_doc["glossary"]) if _is_definition_query(lowered_query) else None
-    if glossary_match:
-        return {
-            "answer": glossary_match["definition"],
-            "sources": [_build_glossary_source(structured_doc, glossary_match)],
-        }
+    if _is_definition_query(lowered_query):
+        glossary_answer = _build_contextual_glossary_answer(structured_doc, lowered_query)
+        if glossary_answer:
+            return glossary_answer
 
     if _is_country_count_query(lowered_query):
         return _build_country_count_answer(structured_doc)
@@ -482,12 +506,16 @@ def _answer_from_structured_doc(query: str, structured_doc: dict) -> dict | None
         stat_key, direction = extreme_request
         return _build_extreme_stat_answer(structured_doc, stat_key, direction)
 
-    requested_fields = _detect_requested_fields(query)
     if matched_players and requested_fields:
-        return _build_multi_player_field_answer(structured_doc, matched_players, requested_fields)
+        player_profiles = _resolve_player_profiles(matched_players, structured_doc["players"], requested_fields, lowered_query)
+        return _build_multi_player_field_answer(structured_doc, player_profiles, requested_fields)
+    if matched_players and _is_stats_only_query(lowered_query):
+        player_profiles = _resolve_player_profiles(matched_players, structured_doc["players"], requested_fields, lowered_query)
+        return _build_multi_player_stats_answer(structured_doc, player_profiles)
 
     if player_match:
-        return _build_player_description_answer(structured_doc, player_match, lowered_query)
+        player_profile = _resolve_player_profile(player_match, structured_doc["players"], requested_fields, lowered_query)
+        return _build_player_description_answer(structured_doc, player_profile, lowered_query)
 
     if country_name and lowered_query.startswith("what about"):
         return _build_country_context_answer(structured_doc, country_name)
@@ -699,13 +727,24 @@ def _build_player_stats_only_answer(structured_doc: dict, player: dict) -> dict:
     }
 
 
-def _build_single_player_field_answer(structured_doc: dict, player: dict, requested_fields: list[str]) -> dict | None:
+def _build_multi_player_stats_answer(structured_doc: dict, players: list[dict]) -> dict | None:
     answer_lines = []
-    for field in requested_fields:
-        value = player["stats"].get(field)
-        if value is None:
-            continue
-        answer_lines.append(f"{player['name']}: {_format_stat_value(field, value)} {_field_unit(field)}".strip())
+    for player in players:
+        summary = _build_player_short_summary(player)
+        if summary:
+            answer_lines.append(summary)
+
+    if not answer_lines:
+        return None
+
+    return {
+        "answer": "\n\n".join(answer_lines),
+        "sources": _build_grouped_sources(structured_doc, players),
+    }
+
+
+def _build_single_player_field_answer(structured_doc: dict, player: dict, requested_fields: list[str], lowered_query: str = "") -> dict | None:
+    answer_lines = _build_field_stat_lines(player["name"], player["stats"], requested_fields)
 
     if not answer_lines:
         return None
@@ -719,22 +758,50 @@ def _build_single_player_field_answer(structured_doc: dict, player: dict, reques
 def _build_multi_player_field_answer(structured_doc: dict, players: list[dict], requested_fields: list[str]) -> dict | None:
     answer_lines = []
     for player in players:
-        field_parts = []
-        for field in requested_fields:
-            value = player["stats"].get(field)
-            if value is None:
-                continue
-            field_parts.append(f"{_STAT_LABELS[field]}: {_format_stat_value(field, value)}")
-        if field_parts:
-            answer_lines.append(f"{player['name']} — " + ", ".join(field_parts))
+        field_lines = _build_field_stat_lines(player["name"], player["stats"], requested_fields)
+        if field_lines:
+            answer_lines.append("\n".join(field_lines))
 
     if not answer_lines:
         return None
 
     return {
-        "answer": "\n".join(answer_lines),
-        "sources": [_build_range_source(structured_doc, players)],
+        "answer": "\n\n".join(answer_lines),
+        "sources": _build_grouped_sources(structured_doc, players),
     }
+
+
+def _build_field_stat_lines(player_name: str, stats: dict, requested_fields: list[str]) -> list[str]:
+    field_groups = [
+        ("Batting", [field for field in requested_fields if field in _BATTING_FIELDS]),
+        ("Bowling", [field for field in requested_fields if field in _BOWLING_FIELDS]),
+        ("Fielding", [field for field in requested_fields if field in _FIELDING_FIELDS]),
+    ]
+    remaining_fields = [
+        field for field in requested_fields
+        if field not in _BATTING_FIELDS and field not in _BOWLING_FIELDS and field not in _FIELDING_FIELDS
+    ]
+
+    lines = []
+    for group_label, group_fields in field_groups:
+        group_parts = []
+        for field in group_fields:
+            value = stats.get(field)
+            if value is None:
+                continue
+            group_parts.append(f"{_STAT_LABELS[field]}: {_format_stat_value(field, value)}")
+        if group_parts:
+            lines.append(f"{player_name} {group_label.lower()} stats: " + ", ".join(group_parts) + ".")
+
+    extra_parts = []
+    for field in remaining_fields:
+        value = stats.get(field)
+        if value is None:
+            continue
+        extra_parts.append(f"{_STAT_LABELS[field]}: {_format_stat_value(field, value)}")
+    if extra_parts:
+        lines.append(f"{player_name}: " + ", ".join(extra_parts) + ".")
+    return lines
 
 
 def _build_extreme_stat_answer(structured_doc: dict, stat_key: str, direction: str) -> dict | None:
@@ -823,6 +890,7 @@ def _flush_player(
     cleaned_description = _sanitize_description(description)
     runs = _extract_runs(cleaned_description)
     source_location = source_location or {}
+    stats = _extract_player_stats(cleaned_description, name, section_name)
     players.append({
         "file_id": file_obj.id,
         "file_name": file_obj.original_filename or file_obj.file.name,
@@ -833,15 +901,16 @@ def _flush_player(
         "line_start": start_line or (line_numbers[0] if line_numbers else 1),
         "line_end": line_numbers[-1] if line_numbers else (end_line or start_line or 1),
         "page_index": source_location.get("page_index"),
+        "page_end": source_location.get("page_end", source_location.get("page_index")),
         "slide_index": source_location.get("slide_index"),
         "sheet_name": source_location.get("sheet_name"),
         "description": cleaned_description,
         "runs": runs,
-        "stats": _extract_player_stats(cleaned_description, name),
+        "stats": stats,
     })
 
 
-def _extract_glossary_entry(cleaned_lines: list[dict], index: int) -> dict | None:
+def _extract_glossary_entry(cleaned_lines: list[dict], index: int, location: dict | None = None) -> dict | None:
     current_text = cleaned_lines[index]["text"]
     if not current_text or len(current_text.split()) > 5:
         return None
@@ -876,6 +945,8 @@ def _extract_glossary_entry(cleaned_lines: list[dict], index: int) -> dict | Non
         "definition": re.sub(r"\s+", " ", " ".join(definition_parts)).strip(),
         "line_start": cleaned_lines[index]["line_number"],
         "line_end": definition_lines[-1]["line_number"],
+        "page_index": (location or {}).get("page_index"),
+        "page_end": (location or {}).get("page_index"),
         "next_index": next_index,
     }
 
@@ -941,6 +1012,8 @@ def _build_source(structured_doc: dict, player: dict) -> dict:
         source["line_end"] = player["line_end"]
     if player.get("page_index") is not None:
         source["page_index"] = player["page_index"]
+    if player.get("page_end") is not None and player.get("page_end") != player.get("page_index"):
+        source["page_end"] = player["page_end"]
     if player.get("slide_index") is not None:
         source["slide_index"] = player["slide_index"]
     if player.get("sheet_name"):
@@ -949,7 +1022,7 @@ def _build_source(structured_doc: dict, player: dict) -> dict:
 
 
 def _build_glossary_source(structured_doc: dict, glossary_entry: dict) -> dict:
-    return {
+    source = {
         "file_name": structured_doc["file_name"],
         "file_type": structured_doc["file_type"],
         "file_id": structured_doc["file_id"],
@@ -957,6 +1030,11 @@ def _build_glossary_source(structured_doc: dict, glossary_entry: dict) -> dict:
         "line_end": glossary_entry["line_end"],
         "highlight_text": glossary_entry["title"],
     }
+    if glossary_entry.get("page_index") is not None:
+        source["page_index"] = glossary_entry["page_index"]
+    if glossary_entry.get("page_end") is not None and glossary_entry.get("page_end") != glossary_entry.get("page_index"):
+        source["page_end"] = glossary_entry["page_end"]
+    return source
 
 
 def _build_range_source(structured_doc: dict, items: list[dict]) -> dict:
@@ -964,6 +1042,7 @@ def _build_range_source(structured_doc: dict, items: list[dict]) -> dict:
     line_end = None
     section_name = None
     page_index = None
+    page_end = None
     slide_index = None
     sheet_name = None
 
@@ -976,6 +1055,9 @@ def _build_range_source(structured_doc: dict, items: list[dict]) -> dict:
             section_name = item.get("section_name")
         if page_index is None and item.get("page_index") is not None:
             page_index = item.get("page_index")
+        item_page_end = item.get("page_end") or item.get("page_index")
+        if item_page_end is not None and (page_end is None or item_page_end > page_end):
+            page_end = item_page_end
         if slide_index is None and item.get("slide_index") is not None:
             slide_index = item.get("slide_index")
         if not sheet_name and item.get("sheet_name"):
@@ -995,6 +1077,8 @@ def _build_range_source(structured_doc: dict, items: list[dict]) -> dict:
         source["line_end"] = line_end
     if page_index is not None:
         source["page_index"] = page_index
+    if page_end is not None and page_end != page_index:
+        source["page_end"] = page_end
     if slide_index is not None:
         source["slide_index"] = slide_index
     if sheet_name:
@@ -1002,7 +1086,63 @@ def _build_range_source(structured_doc: dict, items: list[dict]) -> dict:
     return source
 
 
-def _extract_player_stats(description: str, player_name: str) -> dict:
+def _build_grouped_sources(structured_doc: dict, items: list[dict]) -> list[dict]:
+    if not items:
+        return []
+
+    file_type = (structured_doc.get("file_type") or "").lower()
+    if file_type != "pdf":
+        return [_build_range_source(structured_doc, items)]
+
+    sorted_items = sorted(
+        items,
+        key=lambda item: (
+            item.get("page_index") or 0,
+            item.get("page_end") or item.get("page_index") or 0,
+            item.get("line_start") or 0,
+        ),
+    )
+
+    groups = []
+    current_group = [sorted_items[0]]
+    for item in sorted_items[1:]:
+        previous = current_group[-1]
+        previous_end = previous.get("page_end") or previous.get("page_index") or 0
+        item_start = item.get("page_index") or 0
+        if item_start <= previous_end + 1:
+            current_group.append(item)
+            continue
+        groups.append(_build_range_source(structured_doc, current_group))
+        current_group = [item]
+
+    groups.append(_build_range_source(structured_doc, current_group))
+    return groups
+
+
+def _merge_adjacent_glossary_sources(sources: list[dict]) -> list[dict]:
+    if not sources:
+        return []
+    merged = [dict(sources[0])]
+    for source in sources[1:]:
+        previous = merged[-1]
+        previous_start = previous.get("page_index")
+        previous_end = previous.get("page_end", previous_start)
+        source_start = source.get("page_index")
+        source_end = source.get("page_end", source_start)
+        if (
+            previous.get("file_id") == source.get("file_id")
+            and previous_start is not None
+            and source_start is not None
+            and source_start <= (previous_end or previous_start) + 1
+        ):
+            previous["page_index"] = min(previous_start, source_start)
+            previous["page_end"] = max(previous_end or previous_start, source_end or source_start)
+            continue
+        merged.append(dict(source))
+    return merged
+
+
+def _extract_player_stats(description: str, player_name: str, section_name: str = "") -> dict:
     stats = {}
     batting_match = re.search(
         r"(?:amassed|scored|has scored|scoring)\s+(\d[\d,]*)(?:\+)?\s+runs.*?average of ([\d.]+).*?strike rate of ([\d.]+)",
@@ -1073,8 +1213,77 @@ def _extract_player_stats(description: str, player_name: str) -> dict:
     if "wicketkeeper" in description.lower() or "keeper" in description.lower():
         stats["is_wicketkeeper"] = 1
 
+    table_stats = _extract_tabular_player_stats(description, section_name)
+    for field, value in table_stats.items():
+        if value is None:
+            continue
+        stats[field] = value
+
     stats["player_name"] = player_name
     return stats
+
+
+def _extract_tabular_player_stats(description: str, section_name: str = "") -> dict:
+    cleaned = re.sub(r"\s+", " ", (description or "").strip())
+    if not _looks_like_tabular_player_row(cleaned):
+        return {}
+
+    tokens = re.findall(r"\d[\d,]*(?:\.\d+)?\*?%?", cleaned)
+    if len(tokens) < 4:
+        return {}
+
+    normalized_tokens = [token.rstrip("%") for token in tokens]
+    stats = {}
+    tail_count = len(normalized_tokens) - 1
+    lowered_section = (section_name or "").lower()
+
+    is_batting = (
+        tail_count >= 9
+        or "*" in cleaned
+        or "%" in cleaned
+        or "batting" in lowered_section
+    )
+    is_fielding = tail_count in {3, 4} or "fielding" in lowered_section
+    is_bowling = tail_count >= 6 and not is_batting and ("bowling" in lowered_section or tail_count in {6, 7})
+
+    if is_batting:
+        stats["runs"] = _to_int(normalized_tokens[1]) if len(normalized_tokens) > 1 else None
+        stats["batting_average"] = _to_float(normalized_tokens[2]) if len(normalized_tokens) > 2 else None
+        stats["strike_rate"] = _to_float(normalized_tokens[3]) if len(normalized_tokens) > 3 else None
+        stats["centuries"] = _to_int(normalized_tokens[4]) if len(normalized_tokens) > 4 else None
+        stats["fifties"] = _to_int(normalized_tokens[5]) if len(normalized_tokens) > 5 else None
+        if len(tokens) > 6:
+            stats["highest_score"] = tokens[6].rstrip("%")
+        stats["fours"] = _to_int(normalized_tokens[7]) if len(normalized_tokens) > 7 else None
+        stats["sixes"] = _to_int(normalized_tokens[8]) if len(normalized_tokens) > 8 else None
+        return stats
+
+    if is_bowling:
+        stats["wickets"] = _to_int(normalized_tokens[1]) if len(normalized_tokens) > 1 else None
+        stats["bowling_average"] = _to_float(normalized_tokens[2]) if len(normalized_tokens) > 2 else None
+        stats["economy_rate"] = _to_float(normalized_tokens[3]) if len(normalized_tokens) > 3 else None
+        stats["bowling_strike_rate"] = _to_float(normalized_tokens[4]) if len(normalized_tokens) > 4 else None
+        stats["four_wicket_hauls"] = _to_int(normalized_tokens[5]) if len(normalized_tokens) > 5 else None
+        stats["five_wicket_hauls"] = _to_int(normalized_tokens[6]) if len(normalized_tokens) > 6 else None
+        return stats
+
+    if is_fielding:
+        stats["catches"] = _to_int(normalized_tokens[1]) if len(normalized_tokens) > 1 else None
+        stats["runouts"] = _to_int(normalized_tokens[2]) if len(normalized_tokens) > 2 else None
+        stats["stumpings"] = _to_int(normalized_tokens[3]) if len(normalized_tokens) > 3 else None
+        return stats
+
+    return {}
+
+
+def _looks_like_tabular_player_row(description: str) -> bool:
+    cleaned = re.sub(r"\s+", " ", (description or "").strip())
+    if not cleaned:
+        return False
+    if not re.match(r"^\d[\d,]*\s+ODIs?\b", cleaned, flags=re.IGNORECASE):
+        return False
+    token_count = len(re.findall(r"\d[\d,]*(?:\.\d+)?\*?%?", cleaned))
+    return token_count >= 4
 
 
 def _extract_runs(description: str) -> int | None:
@@ -1176,7 +1385,22 @@ def _is_country_list_query(lowered_query: str) -> bool:
 
 
 def _is_stats_only_query(lowered_query: str) -> bool:
-    return "only stats" in lowered_query or "full stats" in lowered_query or "stats no description" in lowered_query
+    return any(
+        phrase in lowered_query
+        for phrase in (
+            "only stats",
+            "full stats",
+            "stats no description",
+            "give me stats",
+            "batting stats",
+            "bowling stats",
+            "fielding stats",
+            "show stats",
+            "statistics of",
+            "stats about",
+            "player stats",
+        )
+    )
 
 
 def _is_definition_query(lowered_query: str) -> bool:
@@ -1185,6 +1409,15 @@ def _is_definition_query(lowered_query: str) -> bool:
 
 def _detect_requested_fields(query: str) -> list[str]:
     lowered_query = query.lower()
+    requested_fields = []
+
+    if any(phrase in lowered_query for phrase in ("batting stats", "batting statistics", "batting record", "batting records")):
+        requested_fields.extend(_BATTING_FIELDS)
+    if any(phrase in lowered_query for phrase in ("bowling stats", "bowling statistics", "bowling record", "bowling records")):
+        requested_fields.extend(_BOWLING_FIELDS)
+    if any(phrase in lowered_query for phrase in ("fielding stats", "fielding statistics", "fielding record", "fielding records")):
+        requested_fields.extend(_FIELDING_FIELDS)
+
     field_map = [
         ("batting average", "batting_average"),
         ("average", "batting_average"),
@@ -1216,7 +1449,6 @@ def _detect_requested_fields(query: str) -> list[str]:
         matched_fields.append((position, field))
 
     matched_fields.sort(key=lambda item: item[0])
-    requested_fields = []
     for _, field in matched_fields:
         if field in requested_fields:
             continue
@@ -1291,6 +1523,203 @@ def _extract_query_players(query: str, players: list[dict]) -> list[dict]:
         if not duplicate:
             matched.append(player)
     return matched
+
+
+def _resolve_player_profiles(players: list[dict], all_players: list[dict], requested_fields: list[str], lowered_query: str) -> list[dict]:
+    profiles = []
+    seen = set()
+    for player in players:
+        key = (_normalize_name(player["name"]), (player.get("country") or "").lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        profiles.append(_resolve_player_profile(player, all_players, requested_fields, lowered_query))
+    return profiles
+
+
+def _resolve_player_profile(player: dict, all_players: list[dict], requested_fields: list[str], lowered_query: str) -> dict:
+    related_entries = [
+        item for item in all_players
+        if _normalize_name(item.get("name", "")) == _normalize_name(player.get("name", ""))
+        and ((item.get("country") or "").lower() == (player.get("country") or "").lower())
+    ]
+    if not related_entries:
+        return player
+
+    selected_entries = _select_player_entries_for_query(related_entries, requested_fields, lowered_query)
+    if not selected_entries:
+        selected_entries = [player]
+    return _merge_player_entries(selected_entries)
+
+
+def _select_player_entries_for_query(entries: list[dict], requested_fields: list[str], lowered_query: str) -> list[dict]:
+    requested_field_set = set(requested_fields or [])
+    wants_batting = bool(requested_field_set & set(_BATTING_FIELDS))
+    wants_bowling = bool(requested_field_set & set(_BOWLING_FIELDS))
+    wants_fielding = bool(requested_field_set & set(_FIELDING_FIELDS))
+    wants_definition = _is_definition_query(lowered_query)
+    wants_short_overview = _is_short_player_overview_query(lowered_query)
+    wants_stats = _is_stats_only_query(lowered_query) or bool(requested_field_set)
+
+    scoped_entries = []
+    for entry in entries:
+        entry_stats = entry.get("stats", {})
+        if wants_batting and any(entry_stats.get(field) is not None for field in _BATTING_FIELDS):
+            scoped_entries.append(entry)
+            continue
+        if wants_bowling and any(entry_stats.get(field) is not None for field in _BOWLING_FIELDS):
+            scoped_entries.append(entry)
+            continue
+        if wants_fielding and any(entry_stats.get(field) is not None for field in _FIELDING_FIELDS):
+            scoped_entries.append(entry)
+            continue
+
+    if scoped_entries:
+        return scoped_entries
+
+    if wants_definition or wants_short_overview:
+        narrative_entries = [entry for entry in entries if not _looks_like_tabular_player_row(entry.get("description", ""))]
+        if narrative_entries:
+            return narrative_entries
+
+    if wants_stats:
+        stats_entries = [entry for entry in entries if entry.get("stats")]
+        if stats_entries:
+            return stats_entries
+
+    ranked_entries = sorted(
+        entries,
+        key=lambda entry: (
+            0 if _looks_like_tabular_player_row(entry.get("description", "")) else 1,
+            len(entry.get("stats", {})),
+            len(entry.get("description", "")),
+        ),
+        reverse=True,
+    )
+    return ranked_entries[:1]
+
+
+def _merge_player_entries(entries: list[dict]) -> dict:
+    sorted_entries = sorted(
+        entries,
+        key=lambda item: (
+            item.get("page_index") or 0,
+            item.get("page_end") or item.get("page_index") or 0,
+            item.get("line_start") or 0,
+        ),
+    )
+    merged = dict(sorted_entries[0])
+    merged["stats"] = {}
+
+    descriptions = []
+    page_index = None
+    page_end = None
+    line_start = None
+    line_end = None
+    for entry in sorted_entries:
+        description = (entry.get("description") or "").strip()
+        if description and description not in descriptions:
+            descriptions.append(description)
+        for field, value in (entry.get("stats") or {}).items():
+            if value is None:
+                continue
+            merged["stats"][field] = value
+
+        entry_page_start = entry.get("page_index")
+        entry_page_end = entry.get("page_end") or entry_page_start
+        if entry_page_start is not None and (page_index is None or entry_page_start < page_index):
+            page_index = entry_page_start
+        if entry_page_end is not None and (page_end is None or entry_page_end > page_end):
+            page_end = entry_page_end
+
+        entry_line_start = entry.get("line_start")
+        entry_line_end = entry.get("line_end")
+        if entry_line_start is not None and (line_start is None or entry_line_start < line_start):
+            line_start = entry_line_start
+        if entry_line_end is not None and (line_end is None or entry_line_end > line_end):
+            line_end = entry_line_end
+
+    merged["page_index"] = page_index
+    merged["page_end"] = page_end if page_end is not None else page_index
+    merged["line_start"] = line_start if line_start is not None else merged.get("line_start")
+    merged["line_end"] = line_end if line_end is not None else merged.get("line_end")
+    merged["description"] = _choose_preferred_player_description(descriptions)
+    return merged
+
+
+def _choose_preferred_player_description(descriptions: list[str]) -> str:
+    if not descriptions:
+        return ""
+    prose_descriptions = [item for item in descriptions if not _looks_like_tabular_player_row(item)]
+    if prose_descriptions:
+        return max(prose_descriptions, key=len)
+    return max(descriptions, key=len)
+
+
+def _build_contextual_glossary_answer(structured_doc: dict, lowered_query: str) -> dict | None:
+    glossary = structured_doc.get("glossary") or {}
+    if not glossary:
+        return None
+
+    if "average" in lowered_query:
+        batting_entry = _find_glossary_entry(glossary, "batting average")
+        bowling_entry = _find_glossary_entry(glossary, "bowling average")
+        if batting_entry or bowling_entry:
+            answer = (
+                "According to the file, there are two averages in this cricket context: "
+                "batting average and bowling average. Batting average shows how many runs "
+                "a batter scores per dismissal, while bowling average shows how many runs "
+                "a bowler concedes per wicket. In simple terms, a higher batting average "
+                "is better for batters, and a lower bowling average is better for bowlers."
+            )
+            sources = []
+            if batting_entry:
+                sources.append(_build_glossary_source(structured_doc, batting_entry))
+            if bowling_entry:
+                sources.append(_build_glossary_source(structured_doc, bowling_entry))
+            return {"answer": answer, "sources": _merge_adjacent_glossary_sources(sources)}
+
+    if "economy" in lowered_query:
+        economy_entry = _find_glossary_entry(glossary, "economy")
+        if economy_entry:
+            return {
+                "answer": (
+                    "According to the file, economy rate is a bowling measure. "
+                    "In simple terms, it tells you how many runs a bowler gives away per over, "
+                    "so a lower economy rate means tighter and more effective bowling."
+                ),
+                "sources": [_build_glossary_source(structured_doc, economy_entry)],
+            }
+
+    if "strike rate" in lowered_query:
+        strike_entry = _find_glossary_entry(glossary, "strike rate")
+        if strike_entry:
+            return {
+                "answer": (
+                    "According to the file, strike rate measures scoring or wicket-taking speed depending on the context. "
+                    "For batting, it shows how quickly runs are scored. For bowling, it shows how frequently wickets are taken."
+                ),
+                "sources": [_build_glossary_source(structured_doc, strike_entry)],
+            }
+
+    glossary_match = _match_glossary_query(lowered_query, glossary)
+    if not glossary_match:
+        return None
+    return {
+        "answer": f"According to the file, {glossary_match['title']} means: {glossary_match['definition']}",
+        "sources": [_build_glossary_source(structured_doc, glossary_match)],
+    }
+
+
+def _find_glossary_entry(glossary: dict, phrase: str) -> dict | None:
+    phrase = (phrase or "").lower()
+    for term, entry in glossary.items():
+        if phrase in term:
+            return entry
+        title = (entry.get("title") or "").lower()
+        if phrase in title:
+            return entry
+    return None
 
 
 def _ordered_full_stat_fields() -> list[str]:
@@ -1763,68 +2192,6 @@ def _answer_docx_query(query: str, file_obj: File) -> dict | None:
             for p in headings[:10]:
                 level = p.style.name.replace("Heading ", "H")
                 lines.append(f"  [{level}] {p.text.strip()}")
-        return {"answer": "\n".join(lines), "sources": [source]}
-
-    return None
-
-
-# =============================================================================
-# PPTX HANDLER
-# =============================================================================
-
-def _answer_pptx_query(query: str, file_obj: File) -> dict | None:
-    if not _is_pptx_query(query):
-        return None
-
-    try:
-        presentation = Presentation(file_obj.file.path)
-        slides = list(presentation.slides)
-    except Exception:
-        return None
-
-    slide_count = len(slides)
-    titles = []
-    text_counts = []
-    for index, slide in enumerate(slides, start=1):
-        title = ""
-        text_items = []
-        for shape in slide.shapes:
-            if getattr(shape, "has_text_frame", False):
-                text = shape.text_frame.text.strip()
-                if text:
-                    text_items.append(text)
-                    if not title:
-                        title = text.splitlines()[0].strip()
-        if title:
-            titles.append((index, title))
-        text_counts.append((index, len(text_items)))
-
-    q = query.lower()
-    source = _presentation_source(file_obj, slide_index=1)
-
-    if re.search(r"\bhow many slides\b|slide count|number of slides|total slides", q):
-        return {"answer": f"The presentation has {slide_count} slide(s).", "sources": [source]}
-
-    if re.search(r"\bslide titles\b|\btitles\b|\bsections\b", q):
-        if not titles:
-            return {"answer": "The presentation slides do not have clear titles.", "sources": [source]}
-        lines = [f"The presentation has {len(titles)} titled slide(s):"]
-        for slide_index, title in titles[:25]:
-            lines.append(f"  Slide {slide_index}: {title}")
-        if len(titles) > 25:
-            lines.append(f"  ... and {len(titles) - 25} more.")
-        return {"answer": "\n".join(lines), "sources": [source]}
-
-    if re.search(r"\bsummar(?:y|ize|ise)\b|\boverview\b|\bdescribe\b", q):
-        lines = [f"Presentation: {file_obj.original_filename or file_obj.file.name}"]
-        lines.append(f"Slides: {slide_count}")
-        if titles:
-            lines.append("Slide titles:")
-            for slide_index, title in titles[:10]:
-                lines.append(f"  Slide {slide_index}: {title}")
-        if text_counts:
-            busiest_slide = max(text_counts, key=lambda item: item[1])
-            lines.append(f"Most text-heavy slide: Slide {busiest_slide[0]} ({busiest_slide[1]} text block(s)).")
         return {"answer": "\n".join(lines), "sources": [source]}
 
     return None

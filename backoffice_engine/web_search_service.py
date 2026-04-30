@@ -7,7 +7,7 @@ Web Search Mode pipeline: refactor query, search, and synthesize with source con
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from .clients import GeminiClient, GroqClient, SerperClient
-from .constants import CHAT_MODE_WEB_SEARCH, WEB_SEARCH_CONTENT_SNIPPET_LEN
+from .constants import CHAT_MODE_WEB_SEARCH, DOCUMENT_SCOPE_RESPONSE, WEB_SEARCH_CONTENT_SNIPPET_LEN
 from .exceptions import WebSearchError
 from .prompts import WEB_SEARCH_SYNTHESIS_PROMPT
 from .query_service import (
@@ -35,6 +35,7 @@ def build_web_search_prompt(
     chat_history: list | None = None,
     conversation_state: dict | None = None,
     file_ids: list | None = None,
+    strict_document_context: bool = False,
 ) -> dict:
     logger.info("build_web_search_prompt | query_len=%s model=%s", len(query), model_name)
 
@@ -72,6 +73,22 @@ def build_web_search_prompt(
         token_budget=900,
     )
 
+    if strict_document_context and not document_context:
+        return {
+            "answer": DOCUMENT_SCOPE_RESPONSE,
+            "sources": [],
+            "is_greeting": False,
+            "is_summary": False,
+            "chat_mode": CHAT_MODE_WEB_SEARCH,
+            "resolved_query": get_resolved_query_text(
+                cleaned_query,
+                chat_history=chat_history,
+                active_topic=state.get("active_topic", ""),
+                active_entities=state.get("active_entities", []),
+                prefer_document_context=True,
+            ) or cleaned_query,
+        }
+
     answers = []
     used_sources = []
     resolved_queries = []
@@ -82,6 +99,7 @@ def build_web_search_prompt(
             chat_history=chat_history,
             active_topic=state.get("active_topic", ""),
             active_entities=state.get("active_entities", []),
+            prefer_document_context=bool(file_ids) or strict_document_context,
         )
         logger.info("build_web_search_prompt | refactored_queries=%s", query_variations)
         if not query_variations:
@@ -92,6 +110,7 @@ def build_web_search_prompt(
             chat_history=chat_history,
             active_topic=state.get("active_topic", ""),
             active_entities=state.get("active_entities", []),
+            prefer_document_context=bool(file_ids) or strict_document_context,
         )
         resolved_queries.append(resolved_query)
 
@@ -100,8 +119,18 @@ def build_web_search_prompt(
             raise WebSearchError(internal=f"No results returned for query: {resolved_query[:80]}")
 
         formatted_results = _format_results(results)
+        system_prompt = WEB_SEARCH_SYNTHESIS_PROMPT.format(search_results=formatted_results)
+        if strict_document_context:
+            system_prompt += (
+                "\nAdditional file-mode rules:\n"
+                "- Keep the answer strictly aligned with the uploaded document context.\n"
+                "- Use web results only to support or enhance the document meaning.\n"
+                f"- If the question falls outside the document, answer exactly with: {DOCUMENT_SCOPE_RESPONSE}\n"
+                "- Do not switch to unrelated general meanings.\n"
+            )
+
         response = llm.invoke([
-            SystemMessage(content=WEB_SEARCH_SYNTHESIS_PROMPT.format(search_results=formatted_results)),
+            SystemMessage(content=system_prompt),
             HumanMessage(content="Conversation focus: " + focus_context + "\nDocument context: " + (document_context or "No active document context.") + "\nQuestion: " + question_part + "\nReturn valid JSON only with this shape:\n{{\"answer\": \"final answer here\", \"used_result_ids\": [1, 2]}}"),
         ])
         raw_answer = response.content if hasattr(response, "content") else str(response)

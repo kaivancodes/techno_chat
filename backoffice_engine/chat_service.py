@@ -14,6 +14,7 @@ from .constants import (
     _LOCATION_FIELDS,
     DEFAULT_RAG_CHUNK_LIMIT,
     DEFAULT_RAG_TOKEN_BUDGET,
+    DOCUMENT_SCOPE_RESPONSE,
     SUMMARY,
     SUMMARY_RAG_CHUNK_LIMIT,
     SUMMARY_RAG_TOKEN_BUDGET,
@@ -97,13 +98,17 @@ def _extract_source_image(chunk: dict) -> str:
     try:
         file_id = chunk.get("file_id")
         file_type = (chunk.get("normalized_file_type") or chunk.get("file_type") or "").lower()
-        if not file_id or file_type not in {"pdf", "doc", "docx", "ppt", "pptx", "image", "png", "jpg", "jpeg", "webp", "svg"}:
+        if not file_id or file_type not in {"pdf", "doc", "docx", "ppt", "pptx", "md", "txt", "image", "png", "jpg", "jpeg", "webp", "svg"}:
             return ""
         return get_visual_render(
             file_id=file_id,
             file_type=file_type,
             page_index=chunk.get("page_index"),
+            page_end=chunk.get("page_end"),
             slide_index=chunk.get("slide_index"),
+            line_start=chunk.get("line_start"),
+            line_end=chunk.get("line_end"),
+            section_name=chunk.get("section_name"),
         )
     except Exception:
         return ""
@@ -216,15 +221,16 @@ def _build_sources(chunks: list[dict], query: str, answer: str, max_sources: int
             if value is not None:
                 entry[field] = value
 
-        image_url = _extract_source_image(chunk)
-        if image_url:
-            entry["image_url"] = image_url
-            entry["page_render_image_path"] = image_url
-
         sources.append(entry)
         if len(sources) >= max_sources:
             break
-    return _merge_adjacent_sources(sources)
+    merged_sources = _merge_adjacent_sources(sources)
+    for entry in merged_sources:
+        image_url = _extract_source_image(entry)
+        if image_url:
+            entry["image_url"] = image_url
+            entry["page_render_image_path"] = image_url
+    return merged_sources
 
 
 def _format_context(chunks: list[dict]) -> str:
@@ -313,7 +319,8 @@ def _merge_adjacent_sources(sources: list[SourceEntry]) -> list[SourceEntry]:
             and source.get("sheet_name") is None
             and previous.get("section_name") is None
             and source.get("section_name") is None
-            and min(previous_end, source_end) <= max(previous_start, source_start) + 1
+            and source_start <= (previous_end or previous_start) + 1
+            and previous_start <= (source_end or source_start) + 1
         )
         if can_merge_pages:
             previous["page_index"] = min(previous_start, source_start)
@@ -385,7 +392,12 @@ def _request_type(query: str) -> str:
 def _answer_rules(query: str) -> str:
     request_type = _request_type(query)
     if request_type == "summary":
-        return "Summarize all major entities and facts in the context. Do not focus on one item if multiple items are present. Cover the full spread of the retrieved context."
+        return (
+            "Summarize all major entities and facts in the context. "
+            "Do not focus on one item if multiple items are present. "
+            "Cover the full spread of the retrieved context, including all countries or groups that are meaningfully represented. "
+            "Ignore document statistics like page counts, section counts, and word counts unless the user explicitly asked for them."
+        )
     if request_type == "list":
         return "Return only the requested list items from the context. No descriptions. No categories not asked for. No emojis. Deduplicate exact repeats."
     if request_type == "numeric_filter":
@@ -498,6 +510,7 @@ def build_chat_prompt(query: str, file_ids: list, chat_history: list, model_name
             chat_history=chat_history,
             active_topic=state.get("active_topic", ""),
             active_entities=state.get("active_entities", []),
+            prefer_document_context=bool(file_ids),
         )
         resolved_queries.append(resolved_question_part)
 
@@ -524,6 +537,7 @@ def build_chat_prompt(query: str, file_ids: list, chat_history: list, model_name
             chat_history=chat_history,
             active_topic=state.get("active_topic", ""),
             active_entities=state.get("active_entities", []),
+            prefer_document_context=bool(file_ids),
         )
         logger.info(
             "build_chat_prompt | structured answer miss | query=%s | resolved=%s | refactored_queries=%s",
@@ -602,7 +616,7 @@ def build_chat_prompt(query: str, file_ids: list, chat_history: list, model_name
                 "resolved_query": resolved_queries[0] if resolved_queries else cleaned_query,
             }
         return {
-            "answer": EMPTY_RAG_RESPONSE,
+            "answer": DOCUMENT_SCOPE_RESPONSE,
             "sources": [],
             "is_greeting": False,
             "is_summary": is_summary,

@@ -19,7 +19,9 @@ class SourceEntry(TypedDict, total=False):
     file_type: str
     file_id: Optional[int]
     image_url: Optional[str]
+    page_render_image_path: Optional[str]
     page_index: Optional[int]
+    page_end: Optional[int]
     slide_index: Optional[int]
     sheet_name: Optional[str]
     row_start: Optional[int]

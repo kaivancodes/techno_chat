@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from .clients import GeminiClient, GroqClient
-from .constants import CHAT_HISTORY_COUNT, CHAT_MODE_AI_ASSISTANT
+from .constants import CHAT_HISTORY_COUNT, CHAT_MODE_AI_ASSISTANT, DOCUMENT_SCOPE_RESPONSE
 from .prompts import AI_ASSISTANT_SYSTEM_PROMPT
 from .query_service import (
     build_query_variations,
@@ -36,6 +36,7 @@ def build_ai_assistant_prompt(
     model_name: str,
     conversation_state: dict | None = None,
     file_ids: list | None = None,
+    strict_document_context: bool = False,
 ) -> dict:
     logger.info("build_ai_assistant_prompt | query_len=%s model=%s", len(query), model_name)
 
@@ -64,7 +65,6 @@ def build_ai_assistant_prompt(
     use_history = should_include_history_in_answer(cleaned_query)
     lc_history = _build_history(chat_history) if use_history else []
     question_parts = split_multi_question(cleaned_query)
-    llm = _select_llm(model_name)
     focus_context = _focus_context(state)
     document_context = build_document_context_text(
         query=cleaned_query,
@@ -73,8 +73,36 @@ def build_ai_assistant_prompt(
         conversation_state=state,
     ) or "No active document context."
 
+    if strict_document_context and document_context == "No active document context.":
+        return {
+            "answer": DOCUMENT_SCOPE_RESPONSE,
+            "sources": [],
+            "is_greeting": False,
+            "is_summary": False,
+            "chat_mode": CHAT_MODE_AI_ASSISTANT,
+            "resolved_query": get_resolved_query_text(
+                cleaned_query,
+                chat_history=chat_history,
+                active_topic=state.get("active_topic", ""),
+                active_entities=state.get("active_entities", []),
+                prefer_document_context=True,
+            ) or cleaned_query,
+        }
+
+    llm = _select_llm(model_name)
+
+    system_prompt = AI_ASSISTANT_SYSTEM_PROMPT
+    if strict_document_context:
+        system_prompt += (
+            "\nAdditional file-mode rules:\n"
+            f"- Use ONLY the supplied document context.\n"
+            f"- Interpret generic questions using the uploaded document only.\n"
+            f"- If the question falls outside the document, answer exactly with: {DOCUMENT_SCOPE_RESPONSE}\n"
+            "- Do NOT answer from general knowledge in file mode.\n"
+        )
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", AI_ASSISTANT_SYSTEM_PROMPT),
+        ("system", system_prompt),
         MessagesPlaceholder("chat_history"),
         ("human", "Conversation focus: {focus_context}\nDocument context: {document_context}\nQuestion: {input}\nReturn valid JSON only with this shape:\n{{\"answer\": \"final answer here\"}}"),
     ])
@@ -88,6 +116,7 @@ def build_ai_assistant_prompt(
             chat_history=chat_history,
             active_topic=state.get("active_topic", ""),
             active_entities=state.get("active_entities", []),
+            prefer_document_context=bool(file_ids) or strict_document_context,
         )
         logger.info("build_ai_assistant_prompt | refactored_queries=%s", query_variations)
         if not query_variations:
@@ -98,6 +127,7 @@ def build_ai_assistant_prompt(
             chat_history=chat_history,
             active_topic=state.get("active_topic", ""),
             active_entities=state.get("active_entities", []),
+            prefer_document_context=bool(file_ids) or strict_document_context,
         )
         resolved_queries.append(resolved_query)
 
