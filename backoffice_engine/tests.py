@@ -881,6 +881,35 @@ class RagChatTests(BaseTechnoChatTestCase):
         self.assertIn("Economy Rate: 3.93", answer["answer"])
         self.assertEqual(answer["sources"][0]["page_index"], 16)
 
+    def test_tc_rag_pdf_bowling_stats_query_tolerates_player_name_typos(self):
+        structured_doc = {
+            "file_id": 1,
+            "file_name": "ODI_Cricket_Players.pdf",
+            "file_type": "pdf",
+            "players": [
+                {
+                    "name": "Muttiah Muralitharan",
+                    "country": "Sri Lanka",
+                    "description": "350 ODIs 534 23.08 3.93 35.2 15 10",
+                    "stats": structured_file_service._extract_player_stats("350 ODIs 534 23.08 3.93 35.2 15 10", "Muttiah Muralitharan"),
+                    "page_index": 16,
+                    "page_end": 16,
+                    "line_start": 1,
+                    "line_end": 4,
+                },
+            ],
+            "glossary": {},
+        }
+
+        answer = structured_file_service._answer_from_structured_doc(
+            "Give me bowling stats of Muttiah Murlidharan.",
+            structured_doc,
+        )
+
+        self.assertIsNotNone(answer)
+        self.assertIn("Muttiah Muralitharan bowling stats:", answer["answer"])
+        self.assertEqual(answer["sources"][0]["page_index"], 16)
+
     def test_tc_rag_pdf_average_definition_uses_file_context_with_explanation(self):
         structured_doc = {
             "file_id": 1,
@@ -1018,6 +1047,140 @@ class RagChatTests(BaseTechnoChatTestCase):
         self.assertEqual(len(prepared), 2)
         self.assertFalse(prepared[0]["is_previewable"])
         self.assertTrue(prepared[1]["is_previewable"])
+
+    def test_tc_rag_prepare_sources_normalizes_powerpoint_to_slide_reference(self):
+        prepared = views._prepare_sources_for_display([
+            {"file_name": "ODI_Cricket_Best.pptx", "file_type": "power", "file_id": 3, "slide_index": 6},
+        ], "rag")
+
+        self.assertEqual(prepared[0]["file_type"], "pptx")
+        self.assertEqual(prepared[0]["display_ref"], "Slide 6")
+
+    def test_tc_rag_prepare_sources_clamps_docx_page_to_real_page_count(self):
+        user, _ = self.create_contributor(email="viewer4@technostacks.com", username="viewer.four")
+        doc_path = Path(self.temp_media_dir) / "seventeen-pages.docx"
+        doc = DocxDocument()
+        doc.add_paragraph("Page 1")
+        for page_number in range(2, 18):
+            doc.add_page_break()
+            doc.add_paragraph(f"Page {page_number}")
+        doc.save(doc_path)
+
+        file_obj = File.objects.create(
+            user=user,
+            file=SimpleUploadedFile("seventeen-pages.docx", doc_path.read_bytes(), content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            file_type=FileType.DOC,
+            original_filename="seventeen-pages.docx",
+            embedding_status=FileProcessingStatus.COMPLETED,
+        )
+
+        prepared = views._prepare_sources_for_display([
+            {"file_name": "seventeen-pages.docx", "file_type": "docx", "file_id": file_obj.id, "page_index": 24},
+        ], "rag")
+
+        self.assertEqual(prepared[0]["page_range_start"], 17)
+        self.assertEqual(prepared[0]["display_ref"], "Page 17")
+
+    def test_tc_rag_page_render_view_ignores_none_like_source_params_after_reload(self):
+        user, _ = self.create_contributor(email="viewer3@technostacks.com", username="viewer.three")
+        self.set_contributor_session(user)
+
+        docx = File.objects.create(
+            user=user,
+            file=SimpleUploadedFile("report.docx", self.docx_file().read_bytes(), content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            file_type=FileType.DOC,
+            original_filename="report.docx",
+            embedding_status=FileProcessingStatus.COMPLETED,
+        )
+
+        response = self.client.get(reverse("page_render"), {
+            "file_id": docx.id,
+            "file_type": "docx",
+            "page_index": 1,
+            "slide_index": "None",
+            "sheet_name": "None",
+            "row_start": "None",
+            "line_start": "None",
+            "line_end": "None",
+            "section_name": "None",
+        })
+
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["source_type"], "page")
+
+    def test_tc_rag_docx_page_breaks_increment_without_skipping_pages(self):
+        path = Path(self.temp_media_dir) / "paged.docx"
+        doc = DocxDocument()
+        doc.add_paragraph("Page one text")
+        doc.add_page_break()
+        doc.add_paragraph("Page two text")
+        doc.save(path)
+
+        segments = document_reader.docx_file_text(str(path))
+
+        self.assertEqual(len(segments), 2)
+        self.assertEqual(segments[0]["page_index"], 1)
+        self.assertIn("Page one text", segments[0]["text"])
+        self.assertEqual(segments[1]["page_index"], 2)
+        self.assertIn("Page two text", segments[1]["text"])
+
+    def test_tc_rag_csv_country_and_player_queries_are_answered_deterministically(self):
+        user, _ = self.create_contributor(email="table1@technostacks.com", username="table.one")
+        csv_content = (
+            "Country,Player,Runs,Wickets,Economy\n"
+            "India,Bhuvneshwar Kumar,552,141,5.08\n"
+            "New Zealand,Trent Boult,234,211,4.93\n"
+            "Sri Lanka,Muttiah Muralitharan,674,534,3.93\n"
+        )
+        file_obj = File.objects.create(
+            user=user,
+            file=SimpleUploadedFile("players.csv", csv_content.encode("utf-8"), content_type="text/csv"),
+            file_type=FileType.CSV,
+            original_filename="players.csv",
+            embedding_status=FileProcessingStatus.COMPLETED,
+        )
+
+        count_answer = structured_file_service._answer_csv_query("How many countries are mentioned here?", file_obj)
+        list_answer = structured_file_service._answer_csv_query("Name the players mentioned here", file_obj)
+        stats_answer = structured_file_service._answer_csv_query(
+            "Give bowling stats of Muttiah Muralitharan, Trent Boult and Bhuvneshwar Kumar.",
+            file_obj,
+        )
+
+        self.assertEqual(count_answer["answer"], "3 countries are mentioned in the file.")
+        self.assertIn("India", list_answer["answer"])
+        self.assertIn("Bhuvneshwar Kumar", list_answer["answer"])
+        self.assertIn("Muttiah Muralitharan bowling stats:", stats_answer["answer"])
+        self.assertIn("Wickets: 534", stats_answer["answer"])
+        self.assertIn("Economy: 3.93", stats_answer["answer"])
+
+    def test_tc_rag_excel_stats_and_player_queries_are_answered_deterministically(self):
+        user, _ = self.create_contributor(email="table2@technostacks.com", username="table.two")
+        xlsx_path = Path(self.temp_media_dir) / "players.xlsx"
+        workbook = openpyxl.Workbook()
+        ws = workbook.active
+        ws.title = "Players"
+        ws.append(["Country", "Player", "Runs", "Wickets", "Economy", "Strike Rate"])
+        ws.append(["India", "Bhuvneshwar Kumar", 552, 141, 5.08, 67.0])
+        ws.append(["New Zealand", "Trent Boult", 234, 211, 4.93, 65.0])
+        ws.append(["Sri Lanka", "Muttiah Muralitharan", 674, 534, 3.93, 72.0])
+        workbook.save(xlsx_path)
+
+        file_obj = File.objects.create(
+            user=user,
+            file=SimpleUploadedFile("players.xlsx", xlsx_path.read_bytes(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            file_type=FileType.EXCEL,
+            original_filename="players.xlsx",
+            embedding_status=FileProcessingStatus.COMPLETED,
+        )
+
+        stats_list = structured_file_service._answer_excel_query("What stats are explained in this file?", file_obj)
+        player_count = structured_file_service._answer_excel_query("How many total players are there in the file?", file_obj)
+
+        self.assertIn("Runs", stats_list["answer"])
+        self.assertIn("Wickets", stats_list["answer"])
+        self.assertEqual(player_count["answer"], "3 players are mentioned in the file.")
 
 
 class AIAssistantTests(BaseTechnoChatTestCase):

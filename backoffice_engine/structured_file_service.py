@@ -13,6 +13,7 @@ Supports:
 
 from __future__ import annotations
 
+import difflib
 import os
 import re
 
@@ -466,6 +467,16 @@ def _answer_from_structured_doc(query: str, structured_doc: dict) -> dict | None
         if glossary_answer:
             return glossary_answer
 
+    if _is_glossary_count_query(lowered_query):
+        glossary_count_answer = _build_glossary_count_answer(structured_doc)
+        if glossary_count_answer:
+            return glossary_count_answer
+
+    if _is_glossary_list_query(lowered_query):
+        glossary_list_answer = _build_glossary_list_answer(structured_doc)
+        if glossary_list_answer:
+            return glossary_list_answer
+
     if _is_country_count_query(lowered_query):
         return _build_country_count_answer(structured_doc)
 
@@ -558,8 +569,34 @@ def _build_country_count_answer(structured_doc: dict) -> dict | None:
         return None
 
     return {
-        "answer": str(len(countries)),
+        "answer": f"{len(countries)} countries are mentioned in the file.",
         "sources": [_build_range_source(structured_doc, structured_doc["players"])],
+    }
+
+
+def _build_glossary_count_answer(structured_doc: dict) -> dict | None:
+    glossary_entries = list((structured_doc.get("glossary") or {}).values())
+    if not glossary_entries:
+        return None
+
+    return {
+        "answer": f"{len(glossary_entries)} cricket statistics are explained in the file.",
+        "sources": _merge_adjacent_glossary_sources([
+            _build_glossary_source(structured_doc, entry) for entry in glossary_entries
+        ]),
+    }
+
+
+def _build_glossary_list_answer(structured_doc: dict) -> dict | None:
+    glossary_entries = list((structured_doc.get("glossary") or {}).values())
+    if not glossary_entries:
+        return None
+
+    return {
+        "answer": "\n".join(entry.get("title") or entry.get("term", "") for entry in glossary_entries if entry.get("title") or entry.get("term")),
+        "sources": _merge_adjacent_glossary_sources([
+            _build_glossary_source(structured_doc, entry) for entry in glossary_entries
+        ]),
     }
 
 
@@ -598,9 +635,19 @@ def _build_all_players_list_answer(structured_doc: dict) -> dict | None:
     if not players:
         return None
 
-    answer_lines = []
+    players_by_country = {}
+    country_order = []
     for player in players:
-        answer_lines.append(player["name"])
+        country = player["country"] or "Unknown"
+        if country not in players_by_country:
+            players_by_country[country] = []
+            country_order.append(country)
+        players_by_country[country].append(player["name"])
+
+    answer_lines = []
+    for country in country_order:
+        answer_lines.append(country)
+        answer_lines.extend(players_by_country[country])
 
     return {
         "answer": "\n".join(answer_lines),
@@ -954,10 +1001,9 @@ def _extract_glossary_entry(cleaned_lines: list[dict], index: int, location: dic
 def _match_player_query(query: str, players: list[dict]) -> dict | None:
     explicit_match = _PLAYER_QUERY_PATTERN.search(query)
     if explicit_match:
-        target_name = _normalize_name(explicit_match.group(1).strip())
-        for player in players:
-            if _normalize_name(player["name"]) == target_name:
-                return player
+        matched_player = _find_player_by_candidate(explicit_match.group(1).strip(), players)
+        if matched_player:
+            return matched_player
 
     normalized_query = re.sub(r"[^a-z\s]", " ", query.lower())
     normalized_query = re.sub(r"\s+", " ", normalized_query).strip()
@@ -974,6 +1020,11 @@ def _match_player_query(query: str, players: list[dict]) -> dict | None:
             return player
         if _normalize_name(player["name"]) in normalized_compact_query:
             return player
+
+    for candidate in _extract_player_name_candidates(query):
+        matched_player = _find_player_by_candidate(candidate, players)
+        if matched_player:
+            return matched_player
     return None
 
 
@@ -1384,6 +1435,34 @@ def _is_country_list_query(lowered_query: str) -> bool:
     return "name" in lowered_query or "list" in lowered_query
 
 
+def _is_glossary_count_query(lowered_query: str) -> bool:
+    return (
+        "how many" in lowered_query
+        and any(token in lowered_query for token in ("stats", "stat", "statistics"))
+        and "player" not in lowered_query
+        and "country" not in lowered_query
+    )
+
+
+def _is_glossary_list_query(lowered_query: str) -> bool:
+    if _is_stats_only_query(lowered_query):
+        return False
+    if "player" in lowered_query:
+        return False
+    return any(
+        phrase in lowered_query
+        for phrase in (
+            "what stats",
+            "which stats",
+            "all the stats",
+            "stats are explained",
+            "statistics are explained",
+            "list the stats",
+            "name the stats",
+        )
+    )
+
+
 def _is_stats_only_query(lowered_query: str) -> bool:
     return any(
         phrase in lowered_query
@@ -1501,16 +1580,31 @@ def _extract_query_players(query: str, players: list[dict]) -> list[dict]:
     lowered_query = query.lower()
     matched = []
     positions = []
+    seen_names = set()
+
+    for candidate in _extract_player_name_candidates(query):
+        matched_player = _find_player_by_candidate(candidate, players)
+        if not matched_player:
+            continue
+        normalized_name = _normalize_name(matched_player["name"])
+        if normalized_name in seen_names:
+            continue
+        seen_names.add(normalized_name)
+        position = lowered_query.find(candidate.lower())
+        positions.append((position if position != -1 else len(positions), matched_player))
 
     for player in players:
         normalized_name = _normalize_name(player["name"])
         normalized_query = _normalize_name(query)
         if normalized_name not in normalized_query:
             continue
+        if normalized_name in seen_names:
+            continue
 
         position = lowered_query.find(player["name"].lower())
         if position == -1:
             position = normalized_query.find(normalized_name)
+        seen_names.add(normalized_name)
         positions.append((position, player))
 
     positions.sort(key=lambda item: item[0])
@@ -1785,6 +1879,55 @@ def _normalize_name(text: str) -> str:
     return cleaned
 
 
+def _extract_player_name_candidates(query: str) -> list[str]:
+    candidates = []
+
+    for phrase in re.findall(r"\b[A-Z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*){1,4}\b", query or ""):
+        cleaned = phrase.strip(" ,.;:!?")
+        if cleaned and cleaned not in candidates:
+            candidates.append(cleaned)
+
+    tail_match = re.search(r"\b(?:of|about|for)\s+(.+)$", query or "", flags=re.IGNORECASE)
+    if tail_match:
+        tail_text = tail_match.group(1)
+        for piece in re.split(r",|\band\b|&", tail_text, flags=re.IGNORECASE):
+            cleaned = piece.strip(" ,.;:!?")
+            if len(cleaned.split()) < 2:
+                continue
+            if cleaned and cleaned not in candidates:
+                candidates.append(cleaned)
+
+    return candidates
+
+
+def _find_player_by_candidate(candidate: str, players: list[dict], min_ratio: float = 0.82) -> dict | None:
+    normalized_candidate = _normalize_name(candidate)
+    if not normalized_candidate:
+        return None
+
+    for player in players:
+        if _normalize_name(player["name"]) == normalized_candidate:
+            return player
+
+    best_match = None
+    best_ratio = 0.0
+    for player in players:
+        normalized_player = _normalize_name(player["name"])
+        if not normalized_player:
+            continue
+        if normalized_player in normalized_candidate or normalized_candidate in normalized_player:
+            ratio = min(len(normalized_candidate), len(normalized_player)) / max(len(normalized_candidate), len(normalized_player))
+        else:
+            ratio = difflib.SequenceMatcher(None, normalized_candidate, normalized_player).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_match = player
+
+    if best_ratio >= min_ratio:
+        return best_match
+    return None
+
+
 def _to_int(value: str) -> int | None:
     if not value:
         return None
@@ -1827,6 +1970,8 @@ _TABULAR_QUERY_KEYWORDS = {
     "total", "sum", "count", "describe", "statistics", "stats",
     "summarize", "summary", "overview", "distribution", "range",
     "missing", "null", "empty", "top values", "unique values",
+    "countries", "country", "players", "player",
+    "batting stats", "bowling stats", "fielding stats",
 }
 
 _PDF_QUERY_KEYWORDS = {
@@ -1893,6 +2038,160 @@ def _tabular_source(file_obj: File, row_start: int | None = 1, row_end: int | No
     }
 
 
+def _tabular_source_for_indexes(file_obj: File, indexes: list[int], sheet_name: str | None = None) -> dict:
+    if not indexes:
+        return _tabular_source(file_obj, row_start=1, row_end=1, sheet_name=sheet_name)
+    ordered = sorted(indexes)
+    # +2 because DataFrame indexes are zero-based and row 1 is usually the header.
+    return _tabular_source(file_obj, row_start=ordered[0] + 2, row_end=ordered[-1] + 2, sheet_name=sheet_name)
+
+
+def _find_column_by_terms(col_names: list[str], terms: tuple[str, ...], exclude_terms: tuple[str, ...] = ()) -> str | None:
+    lowered_names = [(col, col.lower()) for col in col_names]
+    for term in terms:
+        for original, lowered in lowered_names:
+            if lowered == term:
+                return original
+    for term in terms:
+        for original, lowered in lowered_names:
+            if term in lowered and not any(excluded in lowered for excluded in exclude_terms):
+                return original
+    return None
+
+
+def _unique_non_empty_values(series: "pd.Series") -> list[str]:
+    values = []
+    seen = set()
+    for raw_value in series.dropna().tolist():
+        cleaned = str(raw_value).strip()
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        values.append(cleaned)
+    return values
+
+
+def _tabular_country_column(col_names: list[str]) -> str | None:
+    return _find_column_by_terms(col_names, ("country", "team", "nation", "side"))
+
+
+def _tabular_player_column(col_names: list[str]) -> str | None:
+    return _find_column_by_terms(
+        col_names,
+        ("player", "player name", "name", "batter", "bowler", "cricketer"),
+        exclude_terms=("country", "team", "nation", "sheet", "match"),
+    )
+
+
+def _tabular_stat_columns(col_names: list[str], country_col: str | None, player_col: str | None) -> list[str]:
+    excluded = {
+        (country_col or "").lower(),
+        (player_col or "").lower(),
+        "id",
+        "sr no",
+        "s no",
+        "rank",
+    }
+    stat_columns = []
+    for column in col_names:
+        lowered = column.lower().strip()
+        if lowered in excluded:
+            continue
+        if lowered.endswith("id") and lowered not in {"strike rate", "bowling strike rate"}:
+            continue
+        stat_columns.append(column)
+    return stat_columns
+
+
+def _tabular_query_requests_country_count(query: str) -> bool:
+    return "how many" in query and "countr" in query
+
+
+def _tabular_query_requests_country_list(query: str) -> bool:
+    return "countr" in query and any(word in query for word in ("list", "name", "which", "what"))
+
+
+def _tabular_query_requests_player_count(query: str) -> bool:
+    return "how many" in query and "player" in query
+
+
+def _tabular_query_requests_player_list(query: str) -> bool:
+    return "player" in query and any(word in query for word in ("list", "name", "which", "what"))
+
+
+def _tabular_query_requests_stat_count(query: str) -> bool:
+    return "how many" in query and any(word in query for word in ("stats", "statistics"))
+
+
+def _tabular_query_requests_stat_list(query: str) -> bool:
+    return any(phrase in query for phrase in ("what stats", "which stats", "list the stats", "name the stats", "stats are explained", "statistics are explained"))
+
+
+def _extract_tabular_requested_names(query: str) -> list[str]:
+    candidates = _extract_player_name_candidates(query)
+    seen = set()
+    ordered = []
+    for candidate in candidates:
+        lowered = candidate.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        ordered.append(candidate)
+    return ordered
+
+
+def _match_tabular_name(candidate: str, available_values: list[str], min_ratio: float = 0.82) -> str | None:
+    normalized_candidate = _normalize_name(candidate)
+    if not normalized_candidate:
+        return None
+
+    best_match = None
+    best_ratio = 0.0
+    for value in available_values:
+        normalized_value = _normalize_name(value)
+        if not normalized_value:
+            continue
+        if normalized_value == normalized_candidate:
+            return value
+        if normalized_value in normalized_candidate or normalized_candidate in normalized_value:
+            ratio = min(len(normalized_candidate), len(normalized_value)) / max(len(normalized_candidate), len(normalized_value))
+        else:
+            ratio = difflib.SequenceMatcher(None, normalized_candidate, normalized_value).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_match = value
+
+    if best_ratio >= min_ratio:
+        return best_match
+    return None
+
+
+def _select_tabular_stat_columns(query: str, stat_columns: list[str]) -> list[str]:
+    lowered_query = query.lower()
+    fragments = []
+
+    if "bat" in lowered_query:
+        fragments.extend(("runs", "batting average", "average", "strike rate", "centur", "fift", "highest", "four", "six"))
+    if "bowl" in lowered_query:
+        fragments.extend(("wicket", "economy", "bowling average", "strike rate", "four wicket", "five wicket"))
+    if "field" in lowered_query:
+        fragments.extend(("catch", "stumping", "runout", "run out"))
+
+    if not fragments and "stat" in lowered_query:
+        return stat_columns
+
+    matched_columns = []
+    for column in stat_columns:
+        lowered_column = column.lower()
+        if any(fragment in lowered_column for fragment in fragments):
+            matched_columns.append(column)
+
+    return matched_columns
+
+
 def _document_source(file_obj: File, page_index: int | None = 1) -> dict:
     return {
         "file_name": file_obj.original_filename or file_obj.file.name,
@@ -1943,8 +2242,101 @@ def _answer_df_query(query: str, df: "pd.DataFrame", file_obj: File, label: str,
     col_names_lower = [c.lower() for c in col_names]
     row_count = len(df)
     col_count = len(df.columns)
+    country_col = _tabular_country_column(col_names)
+    player_col = _tabular_player_column(col_names)
+    stat_columns = _tabular_stat_columns(col_names, country_col, player_col)
 
     source = _tabular_source(file_obj, row_start=1, row_end=row_end or row_count, sheet_name=sheet_name)
+
+    if country_col:
+        countries = _unique_non_empty_values(df[country_col])
+        if _tabular_query_requests_country_count(q):
+            return {
+                "answer": f"{len(countries)} countries are mentioned in the file.",
+                "sources": [source],
+            }
+        if _tabular_query_requests_country_list(q):
+            return {
+                "answer": "\n".join(countries),
+                "sources": [source],
+            }
+
+    if player_col:
+        players = _unique_non_empty_values(df[player_col])
+        if _tabular_query_requests_player_count(q):
+            return {
+                "answer": f"{len(players)} players are mentioned in the file.",
+                "sources": [source],
+            }
+        if _tabular_query_requests_player_list(q):
+            if country_col:
+                lines = []
+                seen_countries = []
+                for country in _unique_non_empty_values(df[country_col]):
+                    country_rows = df[df[country_col].astype(str).str.strip().str.lower() == country.lower()]
+                    country_players = _unique_non_empty_values(country_rows[player_col])
+                    if not country_players:
+                        continue
+                    seen_countries.append(country)
+                    lines.append(country)
+                    lines.extend(country_players)
+                if lines:
+                    return {"answer": "\n".join(lines), "sources": [source]}
+            return {"answer": "\n".join(players), "sources": [source]}
+
+    if stat_columns:
+        if _tabular_query_requests_stat_count(q):
+            return {
+                "answer": f"{len(stat_columns)} stats are explained in the file.",
+                "sources": [source],
+            }
+        if _tabular_query_requests_stat_list(q):
+            return {
+                "answer": "\n".join(stat_columns),
+                "sources": [source],
+            }
+
+    if player_col and stat_columns:
+        requested_names = _extract_tabular_requested_names(query)
+        available_players = _unique_non_empty_values(df[player_col])
+        matched_names = []
+        for candidate in requested_names:
+            matched_name = _match_tabular_name(candidate, available_players)
+            if matched_name and matched_name not in matched_names:
+                matched_names.append(matched_name)
+
+        requested_stat_columns = _select_tabular_stat_columns(query, stat_columns)
+        if matched_names and requested_stat_columns:
+            lines = []
+            matched_indexes = []
+            stat_mode = "stats"
+            if "bat" in q:
+                stat_mode = "batting stats"
+            elif "bowl" in q:
+                stat_mode = "bowling stats"
+            elif "field" in q:
+                stat_mode = "fielding stats"
+
+            player_series = df[player_col].astype(str).str.strip()
+            for matched_name in matched_names:
+                player_rows = df[player_series.str.lower() == matched_name.lower()]
+                if player_rows.empty:
+                    continue
+                matched_indexes.extend(player_rows.index.tolist())
+                row = player_rows.iloc[0]
+                lines.append(f"{matched_name} {stat_mode}:")
+                for column in requested_stat_columns:
+                    value = row.get(column)
+                    if pd.isna(value):
+                        continue
+                    if isinstance(value, float) and value.is_integer():
+                        value = int(value)
+                    lines.append(f"{column}: {value}")
+            if lines:
+                return {
+                    "answer": "\n".join(lines),
+                    "sources": [_tabular_source_for_indexes(file_obj, matched_indexes, sheet_name=sheet_name)],
+                }
 
     # ── Row / column counts ───────────────────────────────────────────────────
     if re.search(r"\bhow many rows\b|row count|number of rows|total rows", q):

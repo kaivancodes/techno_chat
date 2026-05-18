@@ -245,13 +245,18 @@ def _docx_count_page_breaks(para_elem) -> int:
     """
     W_PB = f"{{{DOCX_NAMESPACE}}}lastRenderedPageBreak"   # <w:lastRenderedPageBreak/>
     W_BR = f"{{{DOCX_NAMESPACE}}}br"                      # <w:br w:type="page"/>
-    count = 0
+    rendered_breaks = 0
+    explicit_breaks = 0
     for elem in para_elem.iter():
         if elem.tag == W_PB:
-            count += 1
+            rendered_breaks += 1
         elif elem.tag == W_BR and elem.get(f"{{{DOCX_NAMESPACE}}}type") == "page":
-            count += 1
-    return count
+            explicit_breaks += 1
+
+    # Rendered page-break markers can coexist with explicit page breaks for the
+    # same layout boundary. Prefer the rendered markers when present so page
+    # numbering does not drift upward.
+    return rendered_breaks if rendered_breaks else explicit_breaks
 
 
 def _docx_elem_text(elem) -> str:
@@ -283,10 +288,11 @@ def docx_file_text(file_path: str) -> list:
         local = child.tag.split("}")[-1] if "}" in child.tag else child.tag
 
         if local == "p":                               # paragraph
-            current_page += _docx_count_page_breaks(child)
+            page_breaks = _docx_count_page_breaks(child)
             text = _docx_elem_text(child)
             if text:
                 lines_by_page.append((text, current_page))
+            current_page += page_breaks
 
         elif local == "tbl":                           # table
             rows = []

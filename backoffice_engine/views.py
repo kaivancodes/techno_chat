@@ -1,5 +1,6 @@
 import json
 import re
+from functools import lru_cache
 
 from django.conf import settings
 from django.db.models import Count
@@ -31,6 +32,7 @@ from .conversation_state_service import (
     update_conversation_state,
 )
 from .page_render_service import get_page_render, get_source_content, get_source_fallback_content, get_visual_render
+from .document_reader import docx_file_text
 from .ai_assistant_service import build_ai_assistant_prompt
 from .web_search_service import build_web_search_prompt
 from .ingestion_service import embed_file_and_upsert
@@ -89,7 +91,7 @@ def _ordered_range(start, end):
 
 
 def _format_chat_source_ref(source: dict) -> str:
-    file_type = (source.get("file_type") or "").lower()
+    file_type = normalize_file_type(source.get("file_type") or "", source.get("file_name") or "")
     if file_type == "md" and source.get("section_name"):
         start, end = _ordered_range(source.get("line_start"), source.get("line_end"))
         if start is not None and end is not None and start != end:
@@ -123,9 +125,67 @@ def _format_chat_source_ref(source: dict) -> str:
     return ""
 
 
+@lru_cache(maxsize=128)
+def _docx_page_count_for_file(file_id: int, updated_at_key: str) -> int | None:
+    try:
+        file_obj = File.objects.get(id=file_id)
+        segments = docx_file_text(file_obj.file.path)
+    except Exception:
+        return None
+
+    page_numbers = [item.get("page_index") for item in segments if item.get("page_index") is not None]
+    if not page_numbers:
+        return 1
+    return max(page_numbers)
+
+
+def _normalize_docx_source(source: dict) -> dict:
+    normalized = dict(source)
+    file_type = normalize_file_type(source.get("file_type") or "", source.get("file_name") or "")
+    if file_type not in {"doc", "docx"}:
+        return normalized
+
+    file_id = source.get("file_id")
+    if not file_id:
+        return normalized
+
+    try:
+        file_obj = File.objects.only("id", "updated_at").get(id=file_id)
+    except File.DoesNotExist:
+        return normalized
+
+    page_count = _docx_page_count_for_file(file_obj.id, file_obj.updated_at.isoformat())
+    if not page_count:
+        return normalized
+
+    page_index = normalized.get("page_index")
+    if page_index is not None:
+        normalized["page_index"] = max(1, min(page_index, page_count))
+
+    page_end = normalized.get("page_end")
+    if page_end is not None:
+        clamped_end = max(1, min(page_end, page_count))
+        if normalized.get("page_index") is not None:
+            clamped_end = max(normalized["page_index"], clamped_end)
+        normalized["page_end"] = clamped_end
+
+    return normalized
+
+
+def _normalize_chat_sources(sources, chat_mode: str):
+    if chat_mode != CHAT_MODE_RAG:
+        return list(sources or [])
+    normalized_sources = []
+    for src in sources or []:
+        if not isinstance(src, dict):
+            continue
+        normalized_sources.append(_normalize_docx_source(src))
+    return normalized_sources
+
+
 def _prepare_sources_for_display(sources, chat_mode: str):
     prepared = []
-    for src in sources or []:
+    for src in _normalize_chat_sources(sources, chat_mode):
         if not isinstance(src, dict):
             continue
         if src.get("kind") in {"generated_image", "uploaded_image"}:
@@ -137,10 +197,11 @@ def _prepare_sources_for_display(sources, chat_mode: str):
             continue
         if chat_mode != CHAT_MODE_RAG:
             continue
-        normalized_file_type = (src.get("file_type") or "").lower()
+        normalized_file_type = normalize_file_type(src.get("file_type") or "", src.get("file_name") or "")
         prepared.append(
             {
                 **src,
+                "file_type": normalized_file_type,
                 "display_ref": _format_chat_source_ref(src),
                 "display_file_name": src.get("file_name", ""),
                 "display_label": f"{src.get('file_name', '')} · {_format_chat_source_ref(src)}".strip(" ·"),
@@ -517,7 +578,7 @@ def chat_send_view(request, session_id):
                 )
 
             prompt     = result["answer"]
-            sources    = result["sources"]
+            sources    = _normalize_chat_sources(result["sources"], result.get("chat_mode", chat_mode))
             is_greeting = result["is_greeting"]
             is_summary  = result["is_summary"]
             effective_chat_mode = result.get("chat_mode", chat_mode)
@@ -699,6 +760,12 @@ def page_render_view(request):
     if not file_id:
         return JsonResponse({"success": False, "error": "file_id required"}, status=400)
 
+    def _optional_int(value):
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {"", "none", "null", "undefined"}:
+            return None
+        return int(cleaned)
+
     try:
         normalized_type = normalize_file_type(file_type)
         is_visual_source = normalized_type in {"pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "image", "png", "jpg", "jpeg", "webp", "svg"}
@@ -707,11 +774,11 @@ def page_render_view(request):
             image_url = get_visual_render(
                 file_id=int(file_id),
                 file_type=normalized_type,
-                page_index=int(page_index) if page_index else None,
-                page_end=int(page_end) if page_end else None,
-                slide_index=int(slide_index) if slide_index else None,
-                line_start=int(line_start) if line_start else None,
-                line_end=int(line_end) if line_end else None,
+                page_index=_optional_int(page_index),
+                page_end=_optional_int(page_end),
+                slide_index=_optional_int(slide_index),
+                line_start=_optional_int(line_start),
+                line_end=_optional_int(line_end),
                 section_name=section_name if section_name else None,
             )
             return JsonResponse({
@@ -724,12 +791,12 @@ def page_render_view(request):
             content = get_source_content(
                 file_id=int(file_id),
                 file_type=file_type,
-                page_index=int(page_index)   if page_index   else None,
-                slide_index=int(slide_index) if slide_index  else None,
+                page_index=_optional_int(page_index),
+                slide_index=_optional_int(slide_index),
                 sheet_name=sheet_name        if sheet_name   else None,
-                row_start=int(row_start)     if row_start    else None,
-                line_start=int(line_start)   if line_start   else None,
-                line_end=int(line_end)       if line_end     else None,
+                row_start=_optional_int(row_start),
+                line_start=_optional_int(line_start),
+                line_end=_optional_int(line_end),
                 section_name=section_name    if section_name else None,
                 highlight_text=highlight_text,
             )
@@ -748,12 +815,12 @@ def page_render_view(request):
             fallback_content = get_source_fallback_content(
                 file_id=int(file_id),
                 file_type=file_type,
-                page_index=int(page_index) if page_index else None,
-                slide_index=int(slide_index) if slide_index else None,
+                page_index=_optional_int(page_index),
+                slide_index=_optional_int(slide_index),
                 sheet_name=sheet_name if sheet_name else None,
-                row_start=int(row_start) if row_start else None,
-                line_start=int(line_start) if line_start else None,
-                line_end=int(line_end) if line_end else None,
+                row_start=_optional_int(row_start),
+                line_start=_optional_int(line_start),
+                line_end=_optional_int(line_end),
                 section_name=section_name if section_name else None,
                 highlight_text=highlight_text,
             )

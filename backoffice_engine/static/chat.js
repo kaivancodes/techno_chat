@@ -44,6 +44,20 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/"/g, '&quot;');
   }
 
+  function cleanValue(value) {
+    const text = String(value ?? '').trim();
+    if (!text || ['none', 'null', 'undefined'].includes(text.toLowerCase())) return '';
+    return text;
+  }
+
+  function normalizeSourceFileType(value) {
+    const cleaned = cleanValue(value).toLowerCase();
+    if (cleaned === 'power') return 'pptx';
+    if (cleaned === 'excel') return 'xlsx';
+    if (cleaned === 'doc') return 'docx';
+    return cleaned;
+  }
+
   function parseMessage(text) {
     const lines = String(text || '').split('\n');
     let html = '';
@@ -130,18 +144,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function buildLocationRef(src) {
     const orderedRange = (start, end) => {
-      if (start == null || start === '') return ['', ''];
-      if (end == null || end === '') return [start, start];
-      return Number(start) <= Number(end) ? [start, end] : [end, start];
+      const cleanStart = cleanValue(start);
+      const cleanEnd = cleanValue(end);
+      if (!cleanStart) return ['', ''];
+      if (!cleanEnd) return [cleanStart, cleanStart];
+      const startNum = Number(cleanStart);
+      const endNum = Number(cleanEnd);
+      if (!Number.isNaN(startNum) && !Number.isNaN(endNum)) {
+        return startNum <= endNum ? [cleanStart, cleanEnd] : [cleanEnd, cleanStart];
+      }
+      return [cleanStart, cleanEnd];
     };
-    const ft = (src.file_type || '').toLowerCase();
+    const ft = normalizeSourceFileType(src.file_type || '');
     const [rowStart, rowEnd] = orderedRange(src.row_start, src.row_end);
     const [lineStart, lineEnd] = orderedRange(src.line_start, src.line_end);
     const [pageStart, pageEnd] = orderedRange(src.page_index, src.page_end);
-    if (ft === 'md' && src.section_name && lineStart && lineEnd && lineStart !== lineEnd) return `\u00a7 ${esc(src.section_name)} \u00b7 Lines ${lineStart}\u2013${lineEnd}`;
-    if (ft === 'md' && src.section_name) return `\u00a7 ${esc(src.section_name)}`;
-    if ((ft === 'pptx' || ft === 'ppt') && src.slide_index != null) return `Slide ${src.slide_index}`;
-    if ((ft === 'xlsx' || ft === 'xls') && rowStart) return `${src.sheet_name ? `${esc(src.sheet_name)} · ` : ''}${rowStart !== rowEnd ? `Rows ${rowStart}\u2013${rowEnd}` : `Row ${rowStart}`}`;
+    const sectionName = cleanValue(src.section_name);
+    const slideIndex = cleanValue(src.slide_index);
+    const sheetName = cleanValue(src.sheet_name);
+    if (ft === 'md' && sectionName && lineStart && lineEnd && lineStart !== lineEnd) return `\u00a7 ${esc(sectionName)} \u00b7 Lines ${lineStart}\u2013${lineEnd}`;
+    if (ft === 'md' && sectionName) return `\u00a7 ${esc(sectionName)}`;
+    if ((ft === 'pptx' || ft === 'ppt') && slideIndex) return `Slide ${slideIndex}`;
+    if ((ft === 'xlsx' || ft === 'xls') && rowStart) return `${sheetName ? `${esc(sheetName)} · ` : ''}${rowStart !== rowEnd ? `Rows ${rowStart}\u2013${rowEnd}` : `Row ${rowStart}`}`;
     if (ft === 'csv' && rowStart) return rowStart !== rowEnd ? `Rows ${rowStart}\u2013${rowEnd}` : `Row ${rowStart}`;
     if (ft === 'txt' && lineStart) return lineStart !== lineEnd ? `Lines ${lineStart}\u2013${lineEnd}` : `Line ${lineStart}`;
     if (pageStart && pageEnd && pageEnd !== pageStart) return `Pages ${pageStart}\u2013${pageEnd}`;
@@ -150,8 +174,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function canPreviewSource(src) {
-    const ft = (src.file_type || '').toLowerCase();
+    const ft = normalizeSourceFileType(src.file_type || '');
     return !['csv', 'xlsx', 'xls'].includes(ft);
+  }
+
+  function buildSourceButtonDataset(src, fileLabel) {
+    return `data-file-id="${cleanValue(src.file_id)}" data-file-type="${esc(normalizeSourceFileType(src.file_type || ''))}" data-page="${cleanValue(src.page_index)}" data-page-end="${cleanValue(src.page_end)}" data-slide="${cleanValue(src.slide_index)}" data-sheet="${esc(cleanValue(src.sheet_name))}" data-row-start="${cleanValue(src.row_start)}" data-line-start="${cleanValue(src.line_start)}" data-line-end="${cleanValue(src.line_end)}" data-section="${esc(cleanValue(src.section_name))}" data-fname="${fileLabel}" data-highlight="${esc(cleanValue(src.highlight_text))}"`;
   }
 
   function displaySources(sources) {
@@ -179,7 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const ref = buildLocationRef(src);
       const fileLabel = esc(src.file_name || '');
       const sourceLabel = canPreviewSource(src)
-        ? `<button type="button" class="rag-source-btn" data-file-id="${src.file_id || ''}" data-file-type="${src.file_type || ''}" data-page="${src.page_index || ''}" data-page-end="${src.page_end || ''}" data-slide="${src.slide_index || ''}" data-sheet="${esc(src.sheet_name || '')}" data-row-start="${src.row_start || ''}" data-line-start="${src.line_start || ''}" data-line-end="${src.line_end || ''}" data-section="${esc(src.section_name || '')}" data-fname="${fileLabel}" data-highlight="" onclick="openSourceViewer(this)">${fileLabel}</button>`
+        ? `<button type="button" class="rag-source-btn" ${buildSourceButtonDataset(src, fileLabel)} onclick="openSourceViewer(this)">${fileLabel}</button>`
         : `<span class="rag-source-static">${fileLabel}</span>`;
       html += ` <span class="msg-sep">|</span><span class="msg-source">${sourceLabel}${ref ? ` &middot; ${ref}` : ''}</span>`;
     });
@@ -368,22 +396,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const errEl = document.getElementById('sv-error');
     const downloadEl = document.getElementById('sv-download');
     const orderedRange = (start, end) => {
-      if (!start) return ['', ''];
-      if (!end) return [start, start];
-      return Number(start) <= Number(end) ? [start, end] : [end, start];
+      const cleanStart = cleanValue(start);
+      const cleanEnd = cleanValue(end);
+      if (!cleanStart) return ['', ''];
+      if (!cleanEnd) return [cleanStart, cleanStart];
+      const startNum = Number(cleanStart);
+      const endNum = Number(cleanEnd);
+      if (!Number.isNaN(startNum) && !Number.isNaN(endNum)) {
+        return startNum <= endNum ? [cleanStart, cleanEnd] : [cleanEnd, cleanStart];
+      }
+      return [cleanStart, cleanEnd];
     };
 
-    const highlight = btn.dataset.highlight || '';
+    const pageValue = cleanValue(btn.dataset.page);
+    const pageEndValue = cleanValue(btn.dataset.pageEnd);
+    const slideValue = cleanValue(btn.dataset.slide);
+    const sheetValue = cleanValue(btn.dataset.sheet);
+    const rowStartValue = cleanValue(btn.dataset.rowStart);
+    const lineStartValue = cleanValue(btn.dataset.lineStart);
+    const lineEndValue = cleanValue(btn.dataset.lineEnd);
+    const sectionValue = cleanValue(btn.dataset.section);
+    const highlight = cleanValue(btn.dataset.highlight);
     let locLabel = '';
-    if (btn.dataset.page) {
-      const [pageStart, pageEnd] = orderedRange(btn.dataset.page, btn.dataset.pageEnd);
+    if (pageValue) {
+      const [pageStart, pageEnd] = orderedRange(pageValue, pageEndValue);
       locLabel = pageEnd && pageEnd !== pageStart ? `Pages ${pageStart}\u2013${pageEnd}` : `Page ${pageStart}`;
     }
-    else if (btn.dataset.slide) locLabel = `Slide ${btn.dataset.slide}`;
-    else if (btn.dataset.sheet) locLabel = `Sheet: ${btn.dataset.sheet}`;
-    else if (btn.dataset.section) locLabel = `\u00a7 ${btn.dataset.section}`;
-    else if (btn.dataset.lineStart) {
-      const [lineStart, lineEnd] = orderedRange(btn.dataset.lineStart, btn.dataset.lineEnd);
+    else if (slideValue) locLabel = `Slide ${slideValue}`;
+    else if (sheetValue) locLabel = `Sheet: ${sheetValue}`;
+    else if (sectionValue) locLabel = `\u00a7 ${sectionValue}`;
+    else if (lineStartValue) {
+      const [lineStart, lineEnd] = orderedRange(lineStartValue, lineEndValue);
       locLabel = lineEnd && lineEnd !== lineStart ? `Lines ${lineStart}\u2013${lineEnd}` : `Line ${lineStart}`;
     }
     titleEl.textContent = locLabel ? `${btn.dataset.fname} · ${locLabel}` : btn.dataset.fname;
@@ -405,14 +448,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams();
     params.set('file_id', btn.dataset.fileId);
     params.set('file_type', btn.dataset.fileType);
-    if (btn.dataset.page) params.set('page_index', btn.dataset.page);
-    if (btn.dataset.pageEnd) params.set('page_end', btn.dataset.pageEnd);
-    if (btn.dataset.slide) params.set('slide_index', btn.dataset.slide);
-    if (btn.dataset.sheet) params.set('sheet_name', btn.dataset.sheet);
-    if (btn.dataset.rowStart) params.set('row_start', btn.dataset.rowStart);
-    if (btn.dataset.lineStart) params.set('line_start', btn.dataset.lineStart);
-    if (btn.dataset.lineEnd) params.set('line_end', btn.dataset.lineEnd);
-    if (btn.dataset.section) params.set('section_name', btn.dataset.section);
+    if (pageValue) params.set('page_index', pageValue);
+    if (pageEndValue) params.set('page_end', pageEndValue);
+    if (slideValue) params.set('slide_index', slideValue);
+    if (sheetValue) params.set('sheet_name', sheetValue);
+    if (rowStartValue) params.set('row_start', rowStartValue);
+    if (lineStartValue) params.set('line_start', lineStartValue);
+    if (lineEndValue) params.set('line_end', lineEndValue);
+    if (sectionValue) params.set('section_name', sectionValue);
     if (highlight) params.set('highlight', highlight);
 
     fetch(`${PAGE_RENDER_URL}?${params}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
