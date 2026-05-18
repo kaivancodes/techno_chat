@@ -21,7 +21,7 @@ The application is heavily augmented with a highly polished, premium **Admin Das
   - **AI Assistant**: State-of-the-art general conversational capabilities.
   - **Chat with File (RAG)**: Chat contextually with uploaded documents. Supports diverse file types (PDF, DOCX, CSV, Excel, Images) and performs robust statistical table analysis.
   - **Web Search**: Real-time information retrieval powered by Serper.dev.
-  - **Create Image**: Dynamic text-to-image generation directly within the chat interface.
+  - **Create Image**: Dynamic text-to-image and image-to-image generation directly within the chat interface.
   
 - **🛡️ Premium Admin Dashboard**:
   - **Dynamic Theming**: Seamless Light and Dark mode toggling.
@@ -40,6 +40,7 @@ The application is heavily augmented with a highly polished, premium **Admin Das
 | **Backend Framework** | Django | Robust Python web framework handling core logic & routing. |
 | **Database** | PostgreSQL | Scalable relational data persistence. |
 | **Web Search** | Serper.dev | Fast Google Search API integration for real-time web querying. |
+| **Image Generation** | Kie.ai + OpenAI-compatible image models | Supports text-to-image and image-to-image generation inside chat. |
 | **Frontend Strategy** | HTML / CSS / JS | Vanilla implementation leveraging a bespoke, premium "Island" design system. |
 
 ---
@@ -108,6 +109,11 @@ Follow these steps to set up the TechnoChat engine locally.
     SERPER_API_KEY='your_serper_key'
     SERPER_MAX_RESULTS=6
 
+    # Image Generation
+    KIE_API_KEY='your_kie_key'
+    OPENAI_TEXT_IMAGE_MODEL='gpt-image-1'
+    OPENAI_IMAGE_MODEL='gpt-image-1'
+
     # Langchain Tracing
     LANGCHAIN_API_KEY='your_langchain_key'
     LANGCHAIN_TRACING_V2="true"
@@ -151,6 +157,7 @@ TechnoChat is a full-stack Django web application. The following are the core ro
 | `/files/` | `file_list_view` | View and manage uploaded files (PDF, CSV, etc.) for RAG. |
 | `/chat/new/` | `create_session_view` | Initiate a new chat session (AI Assistant, Web Search, RAG). |
 | `/chat/<id>/` | `chat_view` | Enter a specific active chat session. |
+| `/chat/<id>/send/` | `chat_send_view` | Handles all chat modes including Create Image text-to-image and image editing requests. |
 
 ---
 
@@ -161,6 +168,7 @@ TechnoChat is a full-stack Django web application. The following are the core ro
 3.  **User Login**: As a Contributor, log in via `/login/` and land on `/home/`.
 4.  **Upload Context Files**: Navigate to `/files/` and upload data sources (e.g., PDFs or Spreadsheets).
 5.  **Start Chatting**: Go to `/chat/new/` and create a session. If using "Chat with File", attach your uploaded documents. Use the `/chat/<id>/` interface to leverage diverse AI models (Groq, Gemini) to answer questions!
+6.  **Generate or Edit Images**: In an active chat, switch to **Create Image** mode. Enter a prompt to generate a new image, or upload an image first to perform image-to-image editing directly from the chat UI.
 
 ---
 

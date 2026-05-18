@@ -1,6 +1,8 @@
 import json
 import re
 from functools import lru_cache
+import xml.etree.ElementTree as ET
+import zipfile
 
 from django.conf import settings
 from django.db.models import Count
@@ -129,6 +131,20 @@ def _format_chat_source_ref(source: dict) -> str:
 def _docx_page_count_for_file(file_id: int, updated_at_key: str) -> int | None:
     try:
         file_obj = File.objects.get(id=file_id)
+    except Exception:
+        return None
+
+    try:
+        with zipfile.ZipFile(file_obj.file.path) as archive:
+            app_props = archive.read("docProps/app.xml")
+        root = ET.fromstring(app_props)
+        pages_node = root.find("{http://schemas.openxmlformats.org/officeDocument/2006/extended-properties}Pages")
+        if pages_node is not None and (pages_node.text or "").strip().isdigit():
+            return max(1, int(pages_node.text.strip()))
+    except Exception:
+        pass
+
+    try:
         segments = docx_file_text(file_obj.file.path)
     except Exception:
         return None

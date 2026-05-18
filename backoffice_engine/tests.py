@@ -1,9 +1,11 @@
 import json
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+import xml.etree.ElementTree as ET
 
 import fitz
 import openpyxl
@@ -1066,9 +1068,21 @@ class RagChatTests(BaseTechnoChatTestCase):
             doc.add_paragraph(f"Page {page_number}")
         doc.save(doc_path)
 
+        rewritten_path = Path(self.temp_media_dir) / "seventeen-pages-rewritten.docx"
+        with zipfile.ZipFile(doc_path, "r") as source_zip, zipfile.ZipFile(rewritten_path, "w") as target_zip:
+            for item in source_zip.infolist():
+                payload = source_zip.read(item.filename)
+                if item.filename == "docProps/app.xml":
+                    root = ET.fromstring(payload)
+                    pages_node = root.find("{http://schemas.openxmlformats.org/officeDocument/2006/extended-properties}Pages")
+                    if pages_node is not None:
+                        pages_node.text = "17"
+                    payload = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                target_zip.writestr(item, payload)
+
         file_obj = File.objects.create(
             user=user,
-            file=SimpleUploadedFile("seventeen-pages.docx", doc_path.read_bytes(), content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            file=SimpleUploadedFile("seventeen-pages.docx", rewritten_path.read_bytes(), content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
             file_type=FileType.DOC,
             original_filename="seventeen-pages.docx",
             embedding_status=FileProcessingStatus.COMPLETED,
@@ -1080,6 +1094,42 @@ class RagChatTests(BaseTechnoChatTestCase):
 
         self.assertEqual(prepared[0]["page_range_start"], 17)
         self.assertEqual(prepared[0]["display_ref"], "Page 17")
+
+    def test_tc_rag_prepare_sources_prefers_docx_app_xml_page_count(self):
+        user, _ = self.create_contributor(email="viewer5@technostacks.com", username="viewer.five")
+        doc_path = Path(self.temp_media_dir) / "app-props-pages.docx"
+        doc = DocxDocument()
+        doc.add_paragraph("Page one text")
+        doc.add_page_break()
+        doc.add_paragraph("Page two text")
+        doc.save(doc_path)
+
+        rewritten_path = Path(self.temp_media_dir) / "app-props-pages-rewritten.docx"
+        with zipfile.ZipFile(doc_path, "r") as source_zip, zipfile.ZipFile(rewritten_path, "w") as target_zip:
+            for item in source_zip.infolist():
+                payload = source_zip.read(item.filename)
+                if item.filename == "docProps/app.xml":
+                    root = ET.fromstring(payload)
+                    pages_node = root.find("{http://schemas.openxmlformats.org/officeDocument/2006/extended-properties}Pages")
+                    if pages_node is not None:
+                        pages_node.text = "1"
+                    payload = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                target_zip.writestr(item, payload)
+
+        file_obj = File.objects.create(
+            user=user,
+            file=SimpleUploadedFile("app-props-pages.docx", rewritten_path.read_bytes(), content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            file_type=FileType.DOC,
+            original_filename="app-props-pages.docx",
+            embedding_status=FileProcessingStatus.COMPLETED,
+        )
+
+        prepared = views._prepare_sources_for_display([
+            {"file_name": "app-props-pages.docx", "file_type": "docx", "file_id": file_obj.id, "page_index": 24},
+        ], "rag")
+
+        self.assertEqual(prepared[0]["page_range_start"], 1)
+        self.assertEqual(prepared[0]["display_ref"], "Page 1")
 
     def test_tc_rag_page_render_view_ignores_none_like_source_params_after_reload(self):
         user, _ = self.create_contributor(email="viewer3@technostacks.com", username="viewer.three")
