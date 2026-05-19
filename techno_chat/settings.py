@@ -292,11 +292,6 @@ SERPER_MAX_RESULTS = config('SERPER_MAX_RESULTS', default=6, cast=int)
 SERPER_ENDPOINT   = config('SERPER_ENDPOINT', cast=str)
 
 # =========================================================
-# AI ASSISTANT MODE
-# =========================================================
-AI_ASSISTANT_SYSTEM_PROMPT = config('AI_ASSISTANT_SYSTEM_PROMPT', cast=str)
-
-# =========================================================
 # KIE IMAGE
 # =========================================================
 KIE_API_KEY = config('KIE_API_KEY', cast=str)
